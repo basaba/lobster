@@ -211,7 +211,8 @@ test('workflow input resumes preserve the full subject even when the tool envelo
     steps: [
       {
         id: 'draft',
-        run: 'node -e "process.stdout.write(JSON.stringify({text:process.env.LONG_TEXT}))"',
+        run: 'node -e "let data=\'\'; process.stdin.setEncoding(\'utf8\'); process.stdin.on(\'data\', (chunk) => data += chunk); process.stdin.on(\'end\', () => process.stdout.write(JSON.stringify({text:data})))"',
+        stdin: longText,
       },
       {
         id: 'review',
@@ -241,7 +242,6 @@ test('workflow input resumes preserve the full subject even when the tool envelo
     ...process.env,
     LOBSTER_STATE_DIR: stateDir,
     LOBSTER_MAX_TOOL_ENVELOPE_BYTES: '8192',
-    LONG_TEXT: longText,
   };
 
   const first = await runWorkflowFile({
