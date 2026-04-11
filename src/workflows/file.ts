@@ -13,6 +13,8 @@ import { createApprovalIndex, deleteStateJson, readStateJson, writeStateJson } f
 import { readLineFromStream } from '../read_line.js';
 import { resolveInlineShellCommand } from '../shell.js';
 import { sharedAjv } from '../validation.js';
+import { CostTracker } from '../core/cost_tracker.js';
+import type { CostLimit, CostSummary } from '../core/cost_tracker.js';
 
 export type WorkflowFile = {
   name?: string;
@@ -21,6 +23,7 @@ export type WorkflowFile = {
   env?: Record<string, string>;
   cwd?: string;
   steps: WorkflowStep[];
+  cost_limit?: CostLimit;
 };
 
 export type WorkflowStep = {
@@ -88,6 +91,9 @@ export type WorkflowRunResult = {
     subject?: unknown;
     resumeToken?: string;
   };
+  _meta?: {
+    cost?: CostSummary;
+  };
 };
 
 type RunContext = {
@@ -152,6 +158,19 @@ export async function loadWorkflowFile(filePath: string): Promise<WorkflowFile> 
   const steps = (parsed as WorkflowFile).steps;
   if (!Array.isArray(steps) || steps.length === 0) {
     throw new Error('Workflow file requires a non-empty steps array');
+  }
+
+  const costLimit = (parsed as WorkflowFile).cost_limit;
+  if (costLimit !== undefined) {
+    if (!costLimit || typeof costLimit !== 'object' || Array.isArray(costLimit)) {
+      throw new Error('Workflow cost_limit must be an object');
+    }
+    if (!Number.isFinite(Number(costLimit.max_usd)) || Number(costLimit.max_usd) < 0) {
+      throw new Error('Workflow cost_limit.max_usd must be a non-negative number');
+    }
+    if (costLimit.action !== undefined && costLimit.action !== 'warn' && costLimit.action !== 'stop') {
+      throw new Error('Workflow cost_limit.action must be "warn" or "stop"');
+    }
   }
 
   const seen = new Set<string>();
@@ -368,6 +387,7 @@ export async function runWorkflowFile({
       return dryRunWorkflow({ steps, resolvedArgs, results, startIndex, ctx });
     }
 
+    const costTracker = new CostTracker(CostTracker.parsePricingFromEnv(ctx.env));
     let lastStepId: string | null = resumeState?.inputStepId ?? findLastCompletedStepId(steps, results);
 
     for (let idx = startIndex; idx < steps.length; idx++) {
@@ -580,6 +600,11 @@ export async function runWorkflowFile({
     results[step.id] = result;
     lastStepId = step.id;
 
+    trackStepCost(costTracker, step.id, result);
+    if (workflow.cost_limit) {
+      costTracker.checkLimit(workflow.cost_limit, ctx.stderr);
+    }
+
     if (isApprovalStep(step.approval)) {
       const approval = extractApprovalRequest(step, results[step.id]);
 
@@ -638,7 +663,11 @@ export async function runWorkflowFile({
     if (consumedResumeStateKey) {
       await deleteStateJson({ env: ctx.env, key: consumedResumeStateKey });
     }
-    return { status: 'ok', output };
+    const runResult: WorkflowRunResult = { status: 'ok', output };
+    if (costTracker.hasUsage()) {
+      runResult._meta = { cost: costTracker.getSummary() };
+    }
+    return runResult;
   } finally {
     ctx._activeWorkflows?.delete(canonicalFilePath);
   }
@@ -1042,6 +1071,21 @@ function extractApprovalRequest(step: WorkflowStep, result: WorkflowStepResult) 
     items,
     ...(preview ? { preview } : null),
   };
+}
+
+function trackStepCost(costTracker: CostTracker, stepId: string, result: WorkflowStepResult) {
+  const json = result.json;
+  if (!json || typeof json !== 'object') return;
+
+  const items = Array.isArray(json) ? json : [json];
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const usage = (item as Record<string, unknown>).usage;
+    if (!usage || typeof usage !== 'object') continue;
+    const modelValue = (item as Record<string, unknown>).model;
+    const model = typeof modelValue === 'string' ? modelValue : null;
+    costTracker.recordUsage(stepId, model, usage as Record<string, unknown>);
+  }
 }
 
 function parseJson(stdout: string) {

@@ -8,6 +8,7 @@ All notable changes to Lobster will be documented in this file.
 - Add per-step `on_error` workflow policies (`stop|continue|skip_rest`) for partial-failure recovery, with structured step error fields (`error`, `errorMessage`) for condition-based branching. Thanks to [@scottgl9](https://github.com/scottgl9) (PR [#72](https://github.com/openclaw/lobster/pull/72)).
 - Add per-step workflow `timeout_ms` handling, including timeout-triggered aborts, `SIGKILL` for timed shell steps, and dry-run annotations. Thanks to [@scottgl9](https://github.com/scottgl9) (PR [#74](https://github.com/openclaw/lobster/pull/74)).
 - Add workflow condition comparison operators `<`, `<=`, `>`, and `>=` with strict numeric semantics (booleans/null do not coerce), including mixed boolean-expression support with `&&`/`||`. Thanks to [@scottgl9](https://github.com/scottgl9) (PR [#71](https://github.com/openclaw/lobster/pull/71)).
+- Add workflow-level LLM cost tracking with `_meta.cost` summaries, per-step usage attribution, and optional `cost_limit` controls with `warn`/`stop` actions (plus custom pricing via `LOBSTER_LLM_PRICING_JSON`). Thanks to [@scottgl9](https://github.com/scottgl9) (PR [#70](https://github.com/openclaw/lobster/pull/70)).
 
 ## 2026.4.6
 
