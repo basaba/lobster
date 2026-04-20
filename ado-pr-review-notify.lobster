@@ -42,9 +42,14 @@ steps:
           unreviewed='length(reviewers) == 0 || every(reviewers, @.vote == 0)'
           reviewer_count='length(reviewers)'
           approved_count='count(reviewers, @.vote > 0)'
+          | pick title,pullRequestId,unreviewed,recent,reviewer_count,approved_count
         stdin: $item.json
 
       - id: diff
         pipeline: "diff.last --key ado-pr-review:${org}/${project}#$item.json.pullRequestId"
         stdin: $enrich.json
         when: $enrich.json.recent == true && $enrich.json.unreviewed == true
+
+  - id: summary
+    pipeline: "where diff.changed=true | map --unwrap enrich | pick title,pullRequestId"
+    stdin: $check.json

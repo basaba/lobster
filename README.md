@@ -341,3 +341,41 @@ steps:
     command: |
       jq -n --arg text "$TEXT" '{"result": $text}'
 ```
+
+## Publishing to GitHub Packages
+
+This fork is published as `@basaba/lobster` on the GitHub Packages npm registry.
+
+### Prerequisites
+
+- Node.js ≥ 20
+- A GitHub personal access token (PAT) with `read:packages` and `write:packages` scopes
+
+### Authenticate
+
+```bash
+npm login --registry=https://npm.pkg.github.com
+# Username: your GitHub username
+# Password: your PAT
+```
+
+### Build & Publish
+
+```bash
+npm run build   # or: pnpm build
+npm publish
+```
+
+### Installing from GitHub Packages
+
+Consumers need an `.npmrc` in their project (or home directory):
+
+```
+@basaba:registry=https://npm.pkg.github.com
+```
+
+Then install as usual:
+
+```bash
+npm install @basaba/lobster
+```

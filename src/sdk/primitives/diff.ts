@@ -145,6 +145,80 @@ export function diffLast(key, options: any = {}) {
  * @param {Object} [ctx]
  * @returns {Promise<{before: any, after: any, changed: boolean}>}
  */
+/**
+ * Create a diff.gate stage
+ *
+ * Like diffLast, but halts the pipeline when the input has not changed.
+ * If the data changed, the diff result flows downstream. If unchanged, the
+ * pipeline is stopped (halt: true).
+ *
+ * @param {string} key - State key to compare against
+ * @returns {Object} Stage object with run method
+ */
+export function diffGate(key) {
+  if (!key) throw new Error('diffGate requires a key');
+
+  return {
+    type: 'diff.gate',
+    key,
+
+    async run({ input, ctx }) {
+      const items = [];
+      for await (const item of input) {
+        items.push(item);
+      }
+
+      const value = items.length === 1 ? items[0] : items;
+
+      const stateDir = getStateDir(ctx);
+      const filePath = keyToPath(stateDir, key);
+
+      // Read previous value
+      let before = null;
+      try {
+        const text = await fsp.readFile(filePath, 'utf8');
+        before = JSON.parse(text);
+      } catch (err) {
+        if (err?.code !== 'ENOENT') {
+          throw err;
+        }
+      }
+
+      // Compare
+      const changed = stableStringify(before) !== stableStringify(value);
+
+      // Store new value
+      await fsp.mkdir(stateDir, { recursive: true });
+      await fsp.writeFile(filePath, JSON.stringify(value, null, 2) + '\n', 'utf8');
+
+      const result = {
+        kind: 'diff.gate',
+        key,
+        changed,
+        before,
+        after: value,
+      };
+
+      const output = (async function* () {
+        yield result;
+      })();
+
+      if (!changed) {
+        return { halt: true, output };
+      }
+
+      return { output };
+    },
+  };
+}
+
+/**
+ * Diff and store directly (not as a pipeline stage)
+ * @param {string} key
+ * @param {any} value
+ * @param {Object} [ctx]
+ * @returns {Promise<{before: any, after: any, changed: boolean}>}
+ */
 export async function diffAndStoreValue(key, value, ctx = {}) {
   const stateDir = getStateDir(ctx);
   const filePath = keyToPath(stateDir, key);

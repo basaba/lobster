@@ -21,5 +21,5 @@ export { Lobster } from './Lobster.js';
 export { approve } from './primitives/approve.js';
 export { exec } from './primitives/exec.js';
 export { stateGet, stateSet, state } from './primitives/state.js';
-export { diffLast } from './primitives/diff.js';
+export { diffLast, diffGate } from './primitives/diff.js';
 export { runPipeline } from './runtime.js';
