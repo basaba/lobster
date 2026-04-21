@@ -23,6 +23,8 @@ Lobster is an OpenClaw-native workflow shell: typed (JSON-first) pipelines, jobs
 12. [Environment Variables](#12-environment-variables)
 13. [SDK (Programmatic API)](#13-sdk-programmatic-api)
 14. [Built-in Workflow Registry](#14-built-in-workflow-registry)
+15. [Using Lobster as an npm Package (Consumer Guide)](#15-using-lobster-as-an-npm-package-consumer-guide)
+16. [Contributing Commands & Workflows to Lobster](#16-contributing-commands--workflows-to-lobster)
 
 ---
 
@@ -1131,3 +1133,549 @@ Monitor a PR and emit a human-friendly message when it changes.
 | `repo` | ✓ | GitHub repo (`owner/repo`) |
 | `pr` | ✓ | Pull request number |
 | `key` | ✗ | State key override |
+
+---
+
+## 15. Using Lobster as an npm Package (Consumer Guide)
+
+This section is for **consumers** who install `@clawdbot/lobster` as an npm dependency and want to build workflows, custom stages, or recipes in their own project — without modifying the Lobster repository.
+
+### Installation
+
+```bash
+npm install @clawdbot/lobster
+```
+
+### Package Exports
+
+The package provides three entry points:
+
+| Import Path | Exports |
+|-------------|---------|
+| `@clawdbot/lobster` (or `@clawdbot/lobster/sdk`) | `Lobster`, `exec`, `approve`, `stateGet`, `stateSet`, `state`, `diffLast`, `diffGate`, `runPipeline` |
+| `@clawdbot/lobster/core` | Core utilities (expression evaluator, filters, etc.) |
+| `@clawdbot/lobster/recipes/github` | Built-in GitHub recipes (`prMonitor`, `prMonitorNotify`) |
+
+### Quick Start
+
+```typescript
+import { Lobster, exec, approve, diffLast } from '@clawdbot/lobster';
+
+const workflow = new Lobster()
+  .pipe(exec('gh pr view 123 --repo owner/repo --json title,url,state'))
+  .pipe(diffLast('my-pr-123'))
+  .pipe((items) => {
+    const diff = items[0];
+    if (!diff.changed) return [{ msg: 'No changes' }];
+    return [{ msg: `PR changed! State: ${diff.after.state}` }];
+  })
+  .pipe(approve({ prompt: 'Send notification?' }));
+
+const result = await workflow.run();
+
+if (result.status === 'needs_approval') {
+  console.log(result.requiresApproval.prompt);
+  // Later: await workflow.resume(result.requiresApproval.resumeToken, { approved: true });
+} else if (result.ok) {
+  console.log(result.output);
+}
+```
+
+### The `Lobster` Class
+
+The core builder for composing workflows programmatically.
+
+```typescript
+const workflow = new Lobster(options?)
+  .pipe(stage)       // add a pipeline stage (function or object with run())
+  .meta(metadata)    // attach metadata for discovery
+  .clone()           // create a copy with the same stages
+
+const result = await workflow.run(initialInput?);
+const resumed = await workflow.resume(token, { approved?, response?, cancel? });
+```
+
+**Constructor options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `env` | `Record<string, string>` | `process.env` | Environment variables |
+| `stateDir` | `string` | `~/.lobster/state` | Directory for persistent state |
+
+**Result shape** (returned by `.run()` and `.resume()`):
+
+```typescript
+{
+  ok: boolean;
+  status: 'ok' | 'needs_approval' | 'needs_input' | 'cancelled' | 'error';
+  output: any[];                      // output items (empty if halted)
+  requiresApproval: {                 // non-null when status === 'needs_approval'
+    prompt: string;
+    items: any[];
+    resumeToken: string;
+  } | null;
+  requiresInput: {                    // non-null when status === 'needs_input'
+    prompt: string;
+    responseSchema: object;
+    defaults: any;
+    subject: any;
+    resumeToken: string;
+  } | null;
+  error?: { type: string; message: string };  // present when ok === false
+}
+```
+
+### Writing Custom Stages
+
+A stage is anything `.pipe()` accepts: a **function** or an **object with a `run()` method**.
+
+#### Plain Function Stages
+
+A function receives an array of collected items and an optional context, and returns items:
+
+```typescript
+// Synchronous transform
+.pipe((items) => items.filter(item => item.active))
+
+// Async transform
+.pipe(async (items) => {
+  const enriched = await Promise.all(items.map(fetchDetails));
+  return enriched;
+})
+```
+
+#### Generator Function Stages
+
+For streaming (item-by-item processing without buffering), use an async generator:
+
+```typescript
+.pipe(async function* (stream) {
+  for await (const item of stream) {
+    if (item.score > 50) {
+      yield { ...item, tier: 'high' };
+    }
+  }
+})
+```
+
+> **Note:** The runtime detects generator functions and passes them the raw async-iterable stream instead of collecting items first.
+
+#### Object Stages (the `run()` protocol)
+
+For reusable, parameterized stages, create an object with a `run()` method. This is the same protocol used by the built-in primitives (`exec`, `approve`, `diffLast`, etc.):
+
+```typescript
+function threshold(minValue: number) {
+  return {
+    type: 'threshold',
+
+    async run({ input, ctx }) {
+      return {
+        output: (async function* () {
+          for await (const item of input) {
+            if (item.value >= minValue) yield item;
+          }
+        })(),
+      };
+    },
+  };
+}
+
+// Usage:
+new Lobster()
+  .pipe(exec('fetch-data'))
+  .pipe(threshold(10))
+  .pipe(approve({ prompt: 'Process these?' }))
+```
+
+The `run()` method receives:
+
+| Param | Description |
+|-------|-------------|
+| `input` | `AsyncIterable<any>` — stream of items from the previous stage |
+| `ctx` | `{ env, stateDir, mode }` — execution context |
+
+And returns:
+
+| Field | Description |
+|-------|-------------|
+| `output` | `AsyncIterable<any>` — items for the next stage |
+| `halt` | `boolean` — if `true`, stops the pipeline (used for approval gates) |
+
+### Built-in Primitives Reference
+
+These are the stage factories exported from the SDK:
+
+#### `exec(command, options?)`
+
+Run a shell command and emit its output as JSON items.
+
+```typescript
+import { exec } from '@clawdbot/lobster';
+
+.pipe(exec('gh pr list --repo owner/repo --json number,title'))
+.pipe(exec('ls -la', { json: false, shell: true }))
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `json` | `boolean` | `true` | Parse stdout as JSON |
+| `shell` | `boolean` | `false` | Use shell execution (for pipes, redirects) |
+| `cwd` | `string` | `process.cwd()` | Working directory |
+
+#### `approve(options?)`
+
+Create a hard halt requiring human approval before continuing.
+
+```typescript
+import { approve } from '@clawdbot/lobster';
+
+.pipe(approve({ prompt: 'Deploy to production?' }))
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `prompt` | `string` | `'Approve?'` | Prompt shown to the user |
+| `preview` | `boolean` | `true` | Include upstream items in the approval request |
+
+The pipeline halts with `status: 'needs_approval'`. Resume with:
+
+```typescript
+const resumed = await workflow.resume(result.requiresApproval.resumeToken, {
+  approved: true,  // or false to cancel
+});
+```
+
+#### `diffLast(key, options?)`
+
+Compare input against the last stored value for `key`. Stores the new value and emits a diff result.
+
+```typescript
+import { diffLast } from '@clawdbot/lobster';
+
+.pipe(diffLast('my-data-key'))
+// Emits: { kind: 'diff.last', key, changed: boolean, before, after }
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `changesOnly` | `boolean` | `false` | Suppress output when unchanged |
+
+#### `diffGate(key)`
+
+Like `diffLast`, but **halts the pipeline** when unchanged. Only passes through when data has changed.
+
+```typescript
+import { diffGate } from '@clawdbot/lobster';
+
+.pipe(diffGate('monitored-resource'))
+// Pipeline continues only if data changed since last run
+```
+
+#### `stateGet(key)` / `stateSet(key)` / `state.get(key)` / `state.set(key)`
+
+Read/write persistent JSON state by key.
+
+```typescript
+import { stateGet, stateSet, state } from '@clawdbot/lobster';
+
+// Read state
+.pipe(stateGet('counter'))
+
+// Write state (stores input items under the key, then passes them through)
+.pipe(stateSet('counter'))
+
+// Namespace form
+.pipe(state.get('counter'))
+.pipe(state.set('counter'))
+```
+
+State is stored as JSON files in `LOBSTER_STATE_DIR` (default: `~/.lobster/state/`).
+
+### Authoring Reusable Recipes
+
+A recipe is a factory function that returns a configured `Lobster` workflow. Recipes are the recommended pattern for packaging reusable workflows as npm modules.
+
+#### Creating a Recipe
+
+```typescript
+// my-lobster-recipe/index.ts
+import { Lobster, exec, diffLast } from '@clawdbot/lobster';
+
+export function monitorService(options) {
+  const { url, key, changesOnly = false } = options;
+  if (!url) throw new Error('monitorService requires url');
+
+  const stateKey = key ?? `service:${url}`;
+
+  const workflow = new Lobster()
+    .pipe(exec(`curl -s ${url}/health`, { json: true }))
+    .pipe(diffLast(stateKey, { changesOnly }))
+    .pipe((items) => {
+      const diff = items[0];
+      return [{
+        kind: 'service.monitor',
+        url,
+        changed: diff.changed,
+        health: diff.after,
+        previousHealth: diff.before,
+      }];
+    })
+    .meta({
+      name: 'service.monitor',
+      description: 'Monitor a service health endpoint for changes',
+      args: {
+        url: { type: 'string', required: true, description: 'Health endpoint URL' },
+        key: { type: 'string', description: 'State key override' },
+        changesOnly: { type: 'boolean', default: false },
+      },
+    });
+
+  return workflow;
+}
+
+// Attach metadata for discovery
+monitorService.meta = {
+  name: 'service.monitor',
+  description: 'Monitor a service health endpoint for changes',
+  args: {
+    url: { type: 'string', required: true },
+    key: { type: 'string' },
+    changesOnly: { type: 'boolean', default: false },
+  },
+};
+```
+
+#### Using a Recipe
+
+```typescript
+import { monitorService } from 'my-lobster-recipe';
+
+const result = await monitorService({ url: 'https://api.example.com' }).run();
+
+if (result.ok) {
+  const report = result.output[0];
+  if (report.changed) {
+    console.log('Health changed:', report.health);
+  }
+}
+```
+
+#### Registering Recipes for CLI Discovery
+
+If you want your recipe to be discoverable via `recipes.list` / `recipes.run`, register it:
+
+```typescript
+import { registerRecipe } from '@clawdbot/lobster/recipes/github';
+// Note: registerRecipe is exported from the recipes module
+
+registerRecipe(monitorService);
+// Now available via: lobster 'recipes.run --name service.monitor ...'
+```
+
+### Handling Approval & Resume Flow
+
+The approval/resume pattern is central to Lobster's human-in-the-loop design:
+
+```typescript
+import { Lobster, exec, approve } from '@clawdbot/lobster';
+
+const workflow = new Lobster()
+  .pipe(exec('gh pr list --repo owner/repo --json number,title'))
+  .pipe((items) => items.filter(pr => pr.title.includes('URGENT')))
+  .pipe(approve({ prompt: 'Merge these urgent PRs?' }))
+  .pipe(async function* (stream) {
+    for await (const item of stream) {
+      yield { ...item, merged: true };
+    }
+  });
+
+// Step 1: Run — pipeline halts at approve()
+const result = await workflow.run();
+
+if (result.status === 'needs_approval') {
+  const { prompt, items, resumeToken } = result.requiresApproval;
+  console.log(prompt);            // "Merge these urgent PRs?"
+  console.log(items);             // the filtered PR list
+
+  // Step 2: Get user decision, then resume
+  const userSaidYes = await askUser(prompt);
+
+  const final = await workflow.resume(resumeToken, { approved: userSaidYes });
+  // final.status === 'ok'   → pipeline completed
+  // final.status === 'cancelled' → user declined
+  console.log(final.output);
+}
+
+// For input gates (needs_input), resume with a response:
+// await workflow.resume(token, { response: { comment: 'Looks good' } });
+```
+
+### Testing Your Stages and Workflows
+
+```typescript
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Lobster } from '@clawdbot/lobster';
+import { threshold } from './my-stages.js';
+import { monitorService } from './my-recipe.js';
+
+// Test a custom stage
+test('threshold stage filters items', async () => {
+  const result = await new Lobster()
+    .pipe(async function* () {
+      yield { value: 3 };
+      yield { value: 7 };
+      yield { value: 15 };
+    })
+    .pipe(threshold(10))
+    .run();
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.output, [{ value: 15 }]);
+});
+
+// Test a recipe
+test('monitorService returns structured result', async () => {
+  const result = await monitorService({
+    url: 'https://httpbin.org/json',
+  }).run();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.output[0].kind, 'service.monitor');
+});
+
+// Test approval flow
+test('workflow halts at approval gate', async () => {
+  const wf = new Lobster()
+    .pipe(async function* () { yield { id: 1 }; })
+    .pipe(approve({ prompt: 'Continue?' }));
+
+  const result = await wf.run();
+  assert.equal(result.status, 'needs_approval');
+  assert.equal(result.requiresApproval.prompt, 'Continue?');
+
+  // Resume with approval
+  const final = await wf.resume(result.requiresApproval.resumeToken, { approved: true });
+  assert.equal(final.status, 'ok');
+  assert.deepEqual(final.output, [{ id: 1 }]);
+});
+```
+
+Run tests with the Node.js built-in test runner: `node --test test/*.test.ts`
+
+---
+
+## 16. Contributing Commands & Workflows to Lobster
+
+This section is for **contributors** who want to add new built-in commands or workflows to the Lobster repository itself.
+
+### Adding a New Built-in Command
+
+#### Command Interface
+
+Every command is a plain object implementing `LobsterCommand`:
+
+```typescript
+type LobsterCommand = {
+  name: string;                        // unique dot-namespaced name
+  help: () => string;                  // usage text
+  run: (params: RunParams) => Promise<RunResult>;
+  meta?: {
+    description?: string;
+    argsSchema?: object;               // JSON Schema for args
+    examples?: Array<{ args: object; description?: string }>;
+    sideEffects?: string[];            // safety declarations
+  };
+};
+```
+
+The `run()` function receives:
+
+```typescript
+{
+  input: AsyncIterable<any>,           // stream from previous stage
+  args: {
+    _: string[],                       // positional arguments
+    [key: string]: unknown,            // named arguments (--key value)
+  },
+  ctx: {
+    stdin, stdout, stderr,             // standard I/O streams
+    env: Record<string, string>,       // environment variables
+    registry: Registry,                // command registry (for introspection)
+    mode: 'human' | 'tool' | 'sdk',   // execution mode
+    cwd?: string,
+    signal?: AbortSignal,
+    render: {
+      json(items: any[]): void,
+      lines(items: any[]): void,
+    },
+  },
+}
+```
+
+And returns:
+
+```typescript
+{
+  output?: AsyncIterable<any>,  // items for the next stage
+  rendered?: boolean,           // true = handled its own rendering
+  halt?: boolean,               // true = stop the pipeline
+}
+```
+
+#### Side Effects
+
+Declare side effects in `meta.sideEffects`:
+
+| Side Effect | Meaning |
+|-------------|---------|
+| `local_exec` | Runs OS commands |
+| `reads_state` | Reads persistent state |
+| `writes_state` | Writes persistent state |
+| `reads_email` | Reads email |
+| `sends_email` | Sends email |
+| `calls_llm` | Calls a language model |
+| `calls_clawd_tool` | Calls an OpenClaw/Clawd tool |
+
+#### Step-by-Step
+
+1. **Create** `src/commands/stdlib/my_command.ts` implementing the interface above.
+2. **Register** in `src/commands/registry.ts` — import your command and add it to the array in `createDefaultRegistry()`.
+3. **Test** in `test/my_command.test.ts` using `runPipeline` or direct `cmd.run()` invocation (see §15 testing patterns).
+
+#### Common Patterns
+
+**Streaming (item-by-item):**
+```typescript
+return {
+  output: (async function* () {
+    for await (const item of input) yield transform(item);
+  })(),
+};
+```
+
+**Collecting (buffer all):**
+```typescript
+const items = [];
+for await (const item of input) items.push(item);
+return { output: (async function* () { for (const i of sorted) yield i; })() };
+```
+
+**Halting:** `return { halt: true, output: ... };`
+
+**Self-rendering (human mode):** `ctx.render.json(items); return { rendered: true };`
+
+### Adding a Built-in Workflow or Recipe
+
+| When to use | Approach |
+|-------------|----------|
+| Named workflow with args schema, discoverable via `workflows.list` | Add to `src/workflows/registry.ts` + implement in `src/workflows/` |
+| Complex composition with SDK primitives | Create a recipe in `src/recipes/` + register in `src/recipes/registry.ts` |
+| Purely declarative multi-step automation | Create a `.lobster` workflow file (no code changes needed) |
+
+**Workflow:** Implement an async function `({ args, ctx }) => result`, add its metadata to `workflowRegistry` in `src/workflows/registry.ts`, and wire it into the workflow runner.
+
+**Recipe:** Create a factory function returning a `Lobster` instance (see §15 recipe pattern), attach `.meta`, then call `registerRecipe(fn)` in `src/recipes/registry.ts`.
+
+Run all tests with `npm test` (Node.js built-in test runner).
