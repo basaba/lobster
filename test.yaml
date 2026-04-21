@@ -1,0 +1,5 @@
+# Simple prompt — ask Copilot a question
+name: hello
+steps:
+  - id: ask
+    run: echo "hey"

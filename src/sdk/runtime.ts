@@ -73,13 +73,18 @@ async function collectItems(iterable) {
  * @param {any[]} [options.input] - Initial input items
  * @returns {Promise<PipelineResult>}
  */
-export async function runPipelineInternal({ stages, ctx, input = [] }) {
+export async function runPipelineInternal({ stages, ctx, input = [], emitter = null, runId = null }) {
   let stream = toAsyncIterable(input);
   let halted = false;
   let haltedAt = null;
 
   for (let idx = 0; idx < stages.length; idx++) {
     const stage = stages[idx];
+    const stageName = stage?.name ?? stage?.constructor?.name ?? undefined;
+
+    if (emitter) {
+      emitter.emit('step:start', { runId, index: idx, name: stageName });
+    }
 
     let result;
 
@@ -109,7 +114,14 @@ export async function runPipelineInternal({ stages, ctx, input = [] }) {
       halted = true;
       haltedAt = { index: idx, stage };
       stream = result.output ?? toAsyncIterable([]);
+      if (emitter) {
+        emitter.emit('step:complete', { runId, index: idx, name: stageName, status: 'halted' });
+      }
       break;
+    }
+
+    if (emitter) {
+      emitter.emit('step:complete', { runId, index: idx, name: stageName, status: 'ok' });
     }
 
     stream = result?.output ?? toAsyncIterable([]);

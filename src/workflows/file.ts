@@ -721,7 +721,7 @@ export async function runWorkflowFile({
             ...inputRequest,
             resumeToken,
           },
-        };
+        } satisfies WorkflowRunResult;
       }
 
       ctx.stdout.write(`${step.input.prompt}\n`);
@@ -1158,7 +1158,7 @@ export async function runWorkflowFile({
             resumeToken,
             approvalId,
           },
-        };
+        } satisfies WorkflowRunResult;
       }
 
       ctx.stdout.write(`${approval.prompt} [y/N] `);

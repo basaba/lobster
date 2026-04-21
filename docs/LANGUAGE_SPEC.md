@@ -1564,6 +1564,78 @@ test('workflow halts at approval gate', async () => {
 
 Run tests with the Node.js built-in test runner: `node --test test/*.test.ts`
 
+### 15.7 Runtime Events — Real-Time Execution Monitoring
+
+The `Lobster` class extends Node.js `EventEmitter`, allowing consumers to subscribe to lifecycle events during pipeline execution. No disk I/O — events are in-memory only.
+
+#### Events
+
+| Event | Payload | When |
+|---|---|---|
+| `run:start` | `{ runId, source, stages }` | Before pipeline execution begins |
+| `step:start` | `{ runId, index, name? }` | Before each stage runs |
+| `step:complete` | `{ runId, index, name?, status }` | After each stage completes |
+| `run:complete` | `{ runId, status, output?, error?, durationMs }` | After pipeline finishes |
+
+#### Usage
+
+```typescript
+import { Lobster, exec } from '@clawdbot/lobster';
+
+const wf = new Lobster();
+wf.pipe(exec('gh pr list --json number,title'));
+wf.pipe(items => items.filter(pr => pr.title.includes('fix')));
+
+// Subscribe to events
+wf.on('run:start', ({ runId, stages }) => {
+  console.log(`Run ${runId} started with ${stages} stages`);
+});
+
+wf.on('step:start', ({ runId, index }) => {
+  console.log(`  Step ${index} starting...`);
+});
+
+wf.on('step:complete', ({ runId, index, status }) => {
+  console.log(`  Step ${index} → ${status}`);
+});
+
+wf.on('run:complete', ({ runId, status, durationMs }) => {
+  console.log(`Run ${runId} finished: ${status} (${durationMs}ms)`);
+});
+
+const result = await wf.run();
+console.log(result.runId); // Same UUID as in the events
+```
+
+#### `runId` in Results
+
+Every `run()` and `resume()` call generates a unique `runId` (UUID). It is:
+- Included in every event payload for correlation
+- Returned in the result object as `result.runId`
+
+```typescript
+const result = await wf.run([{ id: 1 }]);
+console.log(result.runId); // e.g. "a1b2c3d4-..."
+```
+
+#### Error Events
+
+On pipeline failure, `run:complete` fires with `status: 'error'` and an `error` field:
+
+```typescript
+wf.on('run:complete', ({ status, error }) => {
+  if (status === 'error') {
+    console.error(`Pipeline failed: ${error.message}`);
+  }
+});
+```
+
+#### Notes
+
+- Events fire synchronously during execution — heavy event handlers will slow the pipeline.
+- No events are emitted when using the CLI or workflow files directly (SDK-only feature).
+- Safe to run without any listeners — no overhead if unused.
+
 ---
 
 ## 16. Contributing Commands & Workflows to Lobster

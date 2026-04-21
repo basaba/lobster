@@ -1,6 +1,8 @@
 import { runPipelineInternal } from './runtime.js';
 import { encodeToken, decodeToken } from './token.js';
 import { sharedAjv } from '../validation.js';
+import { EventEmitter } from 'node:events';
+import { randomUUID } from 'node:crypto';
 
 type SdkResumePayload = {
   protocolVersion: 1;
@@ -36,12 +38,13 @@ type SdkResumePayload = {
  * @property {string} [stateDir] - State directory override
  */
 
-export class Lobster {
+export class Lobster extends EventEmitter {
   #stages = [];
   #options: any = {} as any;
   #meta = null;
 
   constructor(options: any = {}) {
+    super();
     this.#options = {
       env: options.env ?? process.env,
       stateDir: options.stateDir,
@@ -72,11 +75,17 @@ export class Lobster {
       mode: 'sdk',
     };
 
+    const runId = randomUUID();
+    const startTime = Date.now();
+    this.emit('run:start', { runId, source: { type: 'sdk', name: (this.#meta as any)?.name }, stages: this.#stages.length });
+
     try {
       const result = await runPipelineInternal({
         stages: this.#stages,
         ctx,
         input: initialInput,
+        emitter: this,
+        runId,
       });
 
       if (result.halted && result.items.length === 1 && result.items[0]?.type === 'approval_request') {
@@ -90,10 +99,11 @@ export class Lobster {
           prompt: approval.prompt,
         });
 
-        return {
+        const ret = {
           ok: true,
           status: 'needs_approval',
           output: [],
+          runId,
           requiresApproval: {
             prompt: approval.prompt,
             items: approval.items,
@@ -101,6 +111,8 @@ export class Lobster {
           },
           requiresInput: null,
         };
+        this.emit('run:complete', { runId, status: 'needs_approval', durationMs: Date.now() - startTime });
+        return ret;
       }
 
       if (result.halted && result.items.length === 1 && result.items[0]?.type === 'input_request') {
@@ -115,10 +127,11 @@ export class Lobster {
           inputSubject: input.subject,
         });
 
-        return {
+        const ret = {
           ok: true,
           status: 'needs_input',
           output: [],
+          runId,
           requiresApproval: null,
           requiresInput: {
             prompt: input.prompt,
@@ -128,20 +141,27 @@ export class Lobster {
             resumeToken,
           },
         };
+        this.emit('run:complete', { runId, status: 'needs_input', durationMs: Date.now() - startTime });
+        return ret;
       }
 
-      return {
+      const ret = {
         ok: true,
         status: 'ok',
         output: result.items,
+        runId,
         requiresApproval: null,
         requiresInput: null,
       };
+      this.emit('run:complete', { runId, status: 'ok', output: result.items, durationMs: Date.now() - startTime });
+      return ret;
     } catch (err) {
+      this.emit('run:complete', { runId, status: 'error', error: { message: err?.message ?? String(err) }, durationMs: Date.now() - startTime });
       return {
         ok: false,
         status: 'error',
         output: [],
+        runId,
         requiresApproval: null,
         requiresInput: null,
         error: {
@@ -231,11 +251,17 @@ export class Lobster {
       mode: 'sdk',
     };
 
+    const runId = randomUUID();
+    const startTime = Date.now();
+    this.emit('run:start', { runId, source: { type: 'sdk', name: (this.#meta as any)?.name }, stages: remainingStages.length });
+
     try {
       const result = await runPipelineInternal({
         stages: remainingStages,
         ctx,
         input: resumeItems,
+        emitter: this,
+        runId,
       });
 
       if (result.halted && result.items.length === 1 && result.items[0]?.type === 'approval_request') {
@@ -249,10 +275,12 @@ export class Lobster {
           prompt: approval.prompt,
         });
 
+        this.emit('run:complete', { runId, status: 'needs_approval', durationMs: Date.now() - startTime });
         return {
           ok: true,
           status: 'needs_approval',
           output: [],
+          runId,
           requiresApproval: {
             prompt: approval.prompt,
             items: approval.items,
@@ -274,10 +302,12 @@ export class Lobster {
           inputSubject: input.subject,
         });
 
+        this.emit('run:complete', { runId, status: 'needs_input', durationMs: Date.now() - startTime });
         return {
           ok: true,
           status: 'needs_input',
           output: [],
+          runId,
           requiresApproval: null,
           requiresInput: {
             prompt: input.prompt,
@@ -289,18 +319,22 @@ export class Lobster {
         };
       }
 
+      this.emit('run:complete', { runId, status: 'ok', output: result.items, durationMs: Date.now() - startTime });
       return {
         ok: true,
         status: 'ok',
         output: result.items,
+        runId,
         requiresApproval: null,
         requiresInput: null,
       };
     } catch (err) {
+      this.emit('run:complete', { runId, status: 'error', error: { message: err?.message ?? String(err) }, durationMs: Date.now() - startTime });
       return {
         ok: false,
         status: 'error',
         output: [],
+        runId,
         requiresApproval: null,
         requiresInput: null,
         error: {
