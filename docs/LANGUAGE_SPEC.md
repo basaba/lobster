@@ -1575,7 +1575,7 @@ The `Lobster` class extends Node.js `EventEmitter`, allowing consumers to subscr
 | `run:start` | `{ runId, source, stages }` | Before pipeline execution begins |
 | `step:start` | `{ runId, index, name? }` | Before each stage runs |
 | `step:complete` | `{ runId, index, name?, status }` | After each stage completes |
-| `run:complete` | `{ runId, status, output?, error?, durationMs }` | After pipeline finishes |
+| `run:complete` | `{ runId, status, output?, error?, approval?, input?, durationMs }` | After pipeline finishes |
 
 #### Usage
 
@@ -1626,6 +1626,26 @@ On pipeline failure, `run:complete` fires with `status: 'error'` and an `error` 
 wf.on('run:complete', ({ status, error }) => {
   if (status === 'error') {
     console.error(`Pipeline failed: ${error.message}`);
+  }
+});
+```
+
+#### Approval & Input Events
+
+When a pipeline halts for approval or input, `run:complete` includes the full context:
+
+```typescript
+wf.on('run:complete', (evt) => {
+  if (evt.status === 'needs_approval') {
+    // evt.approval.prompt — the approval question
+    // evt.approval.items — the items awaiting approval (e.g. draft emails)
+    console.log(`Approval needed: ${evt.approval.prompt}`);
+    console.log(`Items to review:`, evt.approval.items);
+  }
+
+  if (evt.status === 'needs_input') {
+    // evt.input.prompt, evt.input.responseSchema, evt.input.defaults, evt.input.subject
+    console.log(`Input needed: ${evt.input.prompt}`);
   }
 });
 ```

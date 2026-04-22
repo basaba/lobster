@@ -111,7 +111,7 @@ export class Lobster extends EventEmitter {
           },
           requiresInput: null,
         };
-        this.emit('run:complete', { runId, status: 'needs_approval', durationMs: Date.now() - startTime });
+        this.emit('run:complete', { runId, status: 'needs_approval', durationMs: Date.now() - startTime, approval: { prompt: approval.prompt, items: approval.items } });
         return ret;
       }
 
@@ -141,7 +141,7 @@ export class Lobster extends EventEmitter {
             resumeToken,
           },
         };
-        this.emit('run:complete', { runId, status: 'needs_input', durationMs: Date.now() - startTime });
+        this.emit('run:complete', { runId, status: 'needs_input', durationMs: Date.now() - startTime, input: { prompt: input.prompt, responseSchema: input.responseSchema, defaults: input.defaults, subject: input.subject } });
         return ret;
       }
 
@@ -275,7 +275,7 @@ export class Lobster extends EventEmitter {
           prompt: approval.prompt,
         });
 
-        this.emit('run:complete', { runId, status: 'needs_approval', durationMs: Date.now() - startTime });
+        this.emit('run:complete', { runId, status: 'needs_approval', durationMs: Date.now() - startTime, approval: { prompt: approval.prompt, items: approval.items } });
         return {
           ok: true,
           status: 'needs_approval',
@@ -302,7 +302,7 @@ export class Lobster extends EventEmitter {
           inputSubject: input.subject,
         });
 
-        this.emit('run:complete', { runId, status: 'needs_input', durationMs: Date.now() - startTime });
+        this.emit('run:complete', { runId, status: 'needs_input', durationMs: Date.now() - startTime, input: { prompt: input.prompt, responseSchema: input.responseSchema, defaults: input.defaults, subject: input.subject } });
         return {
           ok: true,
           status: 'needs_input',

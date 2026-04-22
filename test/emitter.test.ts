@@ -136,3 +136,27 @@ test('resume emits events', async () => {
   assert.equal(completes.length, 1);
   assert.equal(completes[0].status, 'ok');
 });
+
+test('run:complete for needs_approval includes approval context', async () => {
+  const { approve } = await import('../src/sdk/index.js');
+  const events: any[] = [];
+  const wf = new Lobster();
+  wf.pipe((items) => items.map((i) => ({ ...i, enriched: true })));
+  wf.pipe(approve({ prompt: 'Send these emails?' }));
+  wf.pipe((items) => items);
+
+  wf.on('run:complete', (e) => events.push(e));
+
+  const result = await wf.run([{ to: 'alice@example.com', subject: 'Hi' }]);
+  assert.equal(result.status, 'needs_approval');
+
+  assert.equal(events.length, 1);
+  const evt = events[0];
+  assert.equal(evt.status, 'needs_approval');
+  assert.ok(evt.approval);
+  assert.equal(evt.approval.prompt, 'Send these emails?');
+  assert.ok(Array.isArray(evt.approval.items));
+  assert.equal(evt.approval.items.length, 1);
+  assert.equal(evt.approval.items[0].to, 'alice@example.com');
+  assert.equal(evt.approval.items[0].enriched, true);
+});

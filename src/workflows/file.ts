@@ -670,6 +670,7 @@ export async function runWorkflowFile({
 
     if (!evaluateCondition(step.when ?? step.condition, results)) {
       results[step.id] = { id: step.id, skipped: true };
+      ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — skipped (condition not met)\n`);
       continue;
     }
 
@@ -745,7 +746,9 @@ export async function runWorkflowFile({
     }
 
     if (typeof step.for_each === 'string' && Array.isArray(step.steps)) {
+      const forEachStartMs = Date.now();
       const itemsRef = resolveInputValue(step.for_each, resolvedArgs, results);
+      ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — started (for_each, ${Array.isArray(itemsRef) ? itemsRef.length : '?'} items)\n`);
       if (!Array.isArray(itemsRef)) {
         throw new Error(`Workflow step ${step.id} for_each: expected array, got ${typeof itemsRef}`);
       }
@@ -835,6 +838,7 @@ export async function runWorkflowFile({
       };
       results[step.id] = loopResult;
       lastStepId = step.id;
+      ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — completed (${Date.now() - forEachStartMs}ms, ${iterationResults.length} iterations)\n`);
       trackStepCost(costTracker, step.id, loopResult);
       if (workflow.cost_limit) {
         costTracker.checkLimit(workflow.cost_limit, ctx.stderr);
@@ -846,6 +850,8 @@ export async function runWorkflowFile({
     const cwd = resolveCwd(step.cwd ?? workflow.cwd, resolvedArgs) ?? ctx.cwd;
     const execution = getStepExecution(step);
     const retryConfig = resolveRetryConfig(step.retry);
+    const stepStartMs = Date.now();
+    ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — started\n`);
 
     const executeStepAttempt = async (): Promise<{
       result: WorkflowStepResult;
@@ -1084,6 +1090,7 @@ export async function runWorkflowFile({
       const policy = step.on_error ?? 'stop';
 
       if (policy === 'stop') {
+        ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — failed (${Date.now() - stepStartMs}ms): ${errorMessage}\n`);
         throw isTimeout ? new Error(errorMessage) : err;
       }
 
@@ -1092,6 +1099,7 @@ export async function runWorkflowFile({
         error: true,
         errorMessage,
       };
+      ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — error (${policy}): ${errorMessage}\n`);
 
       if (policy === 'skip_rest') {
         break;
@@ -1107,6 +1115,7 @@ export async function runWorkflowFile({
     }
     results[step.id] = result;
     lastStepId = step.id;
+    ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — completed (${Date.now() - stepStartMs}ms)\n`);
 
     trackStepCost(costTracker, step.id, result);
     if (workflow.cost_limit) {
