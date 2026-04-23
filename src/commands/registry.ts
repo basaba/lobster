@@ -24,6 +24,7 @@ import { gogGmailSearchCommand } from "./stdlib/gog_gmail_search.js";
 import { gogGmailSendCommand } from "./stdlib/gog_gmail_send.js";
 import { emailTriageCommand } from "./stdlib/email_triage.js";
 import { computeCommand } from "./stdlib/compute.js";
+import { emitCommand } from "./stdlib/emit.js";
 
 export function createDefaultRegistry() {
   const commands = new Map();
@@ -57,6 +58,7 @@ export function createDefaultRegistry() {
     gogGmailSendCommand,
     emailTriageCommand,
     computeCommand,
+    emitCommand,
   ]) {
     commands.set(cmd.name, cmd);
   }

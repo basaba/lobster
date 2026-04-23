@@ -1,6 +1,6 @@
 {
   "name": "@basaba/lobster",
-  "version": "2026.4.8",
+  "version": "2026.4.9",
   "description": "Workflow runtime for AI agents - deterministic pipelines with approval gates",
   "type": "module",
   "bin": {
@@ -19,7 +19,8 @@
     ".": "./dist/src/sdk/index.js",
     "./sdk": "./dist/src/sdk/index.js",
     "./core": "./dist/src/core/index.js",
-    "./recipes/github": "./dist/src/recipes/github/index.js"
+    "./recipes/github": "./dist/src/recipes/github/index.js",
+    "./state": "./dist/src/state/store.js"
   },
   "main": "./dist/src/sdk/index.js",
   "scripts": {
