@@ -60,6 +60,7 @@ export type WorkflowStep = {
   when?: unknown;
   parallel?: ParallelConfig;
   for_each?: string;
+  include_unmatched?: boolean;
   item_var?: string;
   index_var?: string;
   batch_size?: number;
@@ -347,6 +348,9 @@ export async function loadWorkflowFile(filePath: string): Promise<WorkflowFile> 
       const loopPipeline = typeof step.pipeline === 'string' ? step.pipeline : undefined;
       if (loopShell || loopPipeline || step.workflow || step.parallel) {
         throw new Error(`Workflow step ${step.id} for_each cannot also define run, command, pipeline, workflow, or parallel`);
+      }
+      if (step.include_unmatched !== undefined && typeof step.include_unmatched !== 'boolean') {
+        throw new Error(`Workflow step ${step.id} include_unmatched must be a boolean`);
       }
       if (step.item_var !== undefined && typeof step.item_var !== 'string') {
         throw new Error(`Workflow step ${step.id} item_var must be a string`);
@@ -822,13 +826,17 @@ export async function runWorkflowFile({
         }
 
         const iterResult: Record<string, unknown> = { [itemVar]: item, [indexVar]: itemIdx };
+        let allSkipped = true;
         for (const subStep of step.steps) {
           const subResult = scopedResults[subStep.id];
           if (subResult && !subResult.skipped) {
             iterResult[subStep.id] = subResult.json !== undefined ? subResult.json : subResult.stdout;
+            allSkipped = false;
           }
         }
-        iterationResults.push(iterResult);
+        if (!allSkipped || step.include_unmatched) {
+          iterationResults.push(iterResult);
+        }
       }
 
       const loopResult: WorkflowStepResult = {

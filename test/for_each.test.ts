@@ -199,3 +199,58 @@ test('for_each dry-run renders loop structure', async () => {
   assert.match(out, /sub-steps: 1/);
   assert.match(out, /batch_size: 2/);
 });
+
+test('for_each skips unmatched items by default when sub-steps have conditions', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify([{name:\\"a\\",active:true},{name:\\"b\\",active:false},{name:\\"c\\",active:true}]))"' },
+      {
+        id: 'loop',
+        for_each: '$data.json',
+        steps: [
+          {
+            id: 'process',
+            when: '$item.json.active == true',
+            command: 'node -e "process.stdout.write(JSON.stringify({processed: process.env.NAME}))"',
+            env: { NAME: '$item.json.name' },
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  const output = result.output as any[];
+  assert.equal(output.length, 2, 'unmatched item b should be excluded');
+  assert.equal(output[0].item.name, 'a');
+  assert.equal(output[1].item.name, 'c');
+  assert.equal(output[0].process.processed, 'a');
+  assert.equal(output[1].process.processed, 'c');
+});
+
+test('for_each include_unmatched keeps all items when sub-steps are skipped', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify([{name:\\"a\\",active:true},{name:\\"b\\",active:false}]))"' },
+      {
+        id: 'loop',
+        for_each: '$data.json',
+        include_unmatched: true,
+        steps: [
+          {
+            id: 'process',
+            when: '$item.json.active == true',
+            command: 'node -e "process.stdout.write(JSON.stringify({processed: process.env.NAME}))"',
+            env: { NAME: '$item.json.name' },
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  const output = result.output as any[];
+  assert.equal(output.length, 2, 'include_unmatched should keep all items');
+  assert.equal(output[0].item.name, 'a');
+  assert.equal(output[0].process.processed, 'a');
+  assert.equal(output[1].item.name, 'b');
+  assert.equal(output[1].process, undefined, 'skipped sub-step should not appear');
+});

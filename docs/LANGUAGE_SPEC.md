@@ -773,12 +773,15 @@ Sub-workflows cannot contain approval/input gates. Circular dependencies are det
 | `for_each` | string | — | Reference to array (e.g. `$step.json`) |
 | `item_var` | string | `"item"` | Variable name for current item |
 | `index_var` | string | `"index"` | Variable name for 0-based index |
+| `include_unmatched` | boolean | `false` | Keep iterations where all sub-steps were skipped |
 | `batch_size` | number | 1 | Items per batch |
 | `pause_ms` | number | 0 | Delay between batches (ms) |
 | `steps` | array | — | Sub-steps (no approval/input/nested loops) |
 
 Inside loop: `$item.json` = current item, `$index.json` = iteration index.
-Output: array of objects, one per iteration.
+Output: array of objects, one per iteration where at least one sub-step executed.
+If all sub-steps are skipped (conditions not met), the iteration is excluded from the output by default.
+Set `include_unmatched: true` to include all iterations regardless.
 
 #### Approval Gate
 
