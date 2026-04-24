@@ -7,7 +7,7 @@
 
 type TokenType =
   | 'number' | 'string' | 'ident' | 'bool' | 'null'
-  | '(' | ')' | ',' | '.'
+  | '(' | ')' | '[' | ']' | ',' | '.'
   | '+' | '-' | '*' | '/' | '%'
   | '==' | '!=' | '<' | '<=' | '>' | '>='
   | '&&' | '||' | '!' | 'eof';
@@ -49,7 +49,7 @@ function tokenize(src: string): Token[] {
 
     // single-char tokens
     const ch = src[i];
-    if ('(),.+-*/%'.includes(ch)) {
+    if ('()[],.+-*/%'.includes(ch)) {
       tokens.push({ type: ch as TokenType, value: ch, pos });
       i++;
       continue;
@@ -208,23 +208,62 @@ class Parser {
     // After an operator or at start of expression, '-' is unary
     if (this.pos === 0) return true;
     const prev = this.tokens[this.pos - 1].type;
-    return prev === '(' || prev === ',' || prev === '==' || prev === '!='
+    return prev === '(' || prev === '[' || prev === ',' || prev === '==' || prev === '!='
         || prev === '<' || prev === '<=' || prev === '>' || prev === '>='
         || prev === '&&' || prev === '||' || prev === '+' || prev === '-'
         || prev === '*' || prev === '/' || prev === '%' || prev === '!';
   }
 
+  // Consume a potentially hyphenated identifier after a dot.
+  // Greedily joins `ident-ident` when the `-` is immediately adjacent
+  // (no whitespace), so `$.user-name` resolves as a single property
+  // while `$.user - name` remains subtraction.
+  private consumeHyphenatedIdent(): string {
+    const first = this.expect('ident');
+    let name = first.value as string;
+    const firstEnd = first.pos + (first.value as string).length;
+    let expectedPos = firstEnd;
+    while (
+      this.peek().type === '-' &&
+      this.peek().pos === expectedPos
+    ) {
+      const dash = this.peek();
+      const afterDash = this.tokens[this.pos + 1];
+      if (!afterDash || afterDash.type !== 'ident' || afterDash.pos !== dash.pos + 1) break;
+      this.advance(); // consume '-'
+      const next = this.advance(); // consume ident
+      name += '-' + (next.value as string);
+      expectedPos = next.pos + (next.value as string).length;
+    }
+    return name;
+  }
+
   private parsePostfix(): ASTNode {
     let node = this.parsePrimary();
-    // dot access chains: expr.field.field
-    while (this.peek().type === '.') {
-      this.advance();
-      const ident = this.expect('ident');
-      if (node.kind === 'path') {
-        node.parts.push(ident.value as string);
+    // dot and bracket access chains: expr.field, expr["key"], expr[0]
+    while (this.peek().type === '.' || this.peek().type === '[') {
+      if (this.peek().type === '.') {
+        this.advance();
+        const part = this.consumeHyphenatedIdent();
+        if (node.kind === 'path') {
+          node.parts.push(part);
+        } else {
+          node = { kind: 'call', name: '__dot', args: [node, { kind: 'literal', value: part }] };
+        }
       } else {
-        // Can't dot-access on non-path node at parse time; wrap it
-        node = { kind: 'call', name: '__dot', args: [node, { kind: 'literal', value: ident.value }] };
+        // bracket access: ["key"] or [0] or [expr]
+        this.advance(); // consume '['
+        const inner = this.parseOr();
+        this.expect(']');
+        if (
+          inner.kind === 'literal' &&
+          (typeof inner.value === 'string' || typeof inner.value === 'number') &&
+          node.kind === 'path'
+        ) {
+          node.parts.push(String(inner.value));
+        } else {
+          node = { kind: 'call', name: '__bracket', args: [node, inner] };
+        }
       }
     }
     return node;
@@ -270,10 +309,24 @@ class Parser {
       // path: could start with $ or @ or be a bare identifier
       if (name === '$' || name === '@') {
         const parts: string[] = [];
-        while (this.peek().type === '.') {
-          this.advance();
-          const part = this.expect('ident');
-          parts.push(part.value as string);
+        while (this.peek().type === '.' || this.peek().type === '[') {
+          if (this.peek().type === '.') {
+            this.advance();
+            parts.push(this.consumeHyphenatedIdent());
+          } else {
+            this.advance(); // consume '['
+            const inner = this.parseOr();
+            this.expect(']');
+            if (inner.kind === 'literal' && (typeof inner.value === 'string' || typeof inner.value === 'number')) {
+              parts.push(String(inner.value));
+            } else {
+              // Dynamic bracket on root — build path so far, then wrap
+              let base: ASTNode = { kind: 'path', root: name as '$' | '@', parts };
+              base = { kind: 'call', name: '__bracket', args: [base, inner] };
+              // Continue any remaining postfix in parsePostfix
+              return base;
+            }
+          }
         }
         return { kind: 'path', root: name as '$' | '@', parts };
       }
@@ -477,6 +530,12 @@ export function evalNode(node: ASTNode, ctx: EvalContext): unknown {
         const key = evalNode(node.args[1], ctx) as string;
         if (obj == null || typeof obj !== 'object') return undefined;
         return (obj as any)[key];
+      }
+      if (node.name === '__bracket') {
+        const obj = evalNode(node.args[0], ctx);
+        const key = evalNode(node.args[1], ctx);
+        if (obj == null || typeof obj !== 'object') return undefined;
+        return (obj as any)[key as any];
       }
 
       const fn = BUILTIN_FUNCTIONS[node.name];

@@ -212,3 +212,73 @@ test('expr: combined logic and comparison', () => {
   assert.equal(eval_('age > 18 && active == true', item), true);
   assert.equal(eval_('age < 18 || active == false', item), false);
 });
+
+// ---- Hyphenated property names ----
+
+test('expr: $.hyphen-key resolves hyphenated property', () => {
+  assert.equal(eval_('$.user-name', { 'user-name': 'Alice' }), 'Alice');
+});
+
+test('expr: nested hyphenated property via $', () => {
+  assert.equal(
+    eval_('$.user.first-name', { user: { 'first-name': 'Bob' } }),
+    'Bob',
+  );
+});
+
+test('expr: @.hyphen-key inside predicate', () => {
+  const item = { items: [{ 'is-active': true }, { 'is-active': false }] };
+  assert.equal(eval_('some(items, @.is-active == true)', item), true);
+});
+
+test('expr: multi-segment hyphenated key (my-long-name)', () => {
+  assert.equal(eval_('$.my-long-name', { 'my-long-name': 42 }), 42);
+});
+
+test('expr: spaced minus is still subtraction', () => {
+  assert.equal(eval_('$.x - $.y', { x: 10, y: 3 }), 7);
+});
+
+test('expr: dot access then spaced subtraction', () => {
+  assert.equal(eval_('$.foo.bar - 1', { foo: { bar: 5 } }), 4);
+});
+
+test('expr: bare path with dot-hyphen', () => {
+  assert.equal(eval_('user.first-name', { user: { 'first-name': 'Eve' } }), 'Eve');
+});
+
+// ---- Bracket notation ----
+
+test('expr: $["key"] accesses property with special chars', () => {
+  assert.equal(eval_('$["my.key"]', { 'my.key': 'value' }), 'value');
+});
+
+test('expr: $.obj["first name"] nested bracket access', () => {
+  assert.equal(eval_('$.user["first name"]', { user: { 'first name': 'Alice' } }), 'Alice');
+});
+
+test('expr: @["type/kind"] in predicate', () => {
+  const item = { items: [{ 'type/kind': 'a' }, { 'type/kind': 'b' }] };
+  assert.equal(eval_('some(items, @["type/kind"] == "a")', item), true);
+});
+
+test('expr: $["a"]["b"] chained brackets', () => {
+  assert.equal(eval_('$["a"]["b"]', { a: { b: 42 } }), 42);
+});
+
+test('expr: $[0] numeric index on array', () => {
+  assert.equal(eval_('$.items[0]', { items: ['x', 'y', 'z'] }), 'x');
+});
+
+test('expr: mixed dot and bracket: $.users[1].name', () => {
+  const item = { users: [{ name: 'Alice' }, { name: 'Bob' }] };
+  assert.equal(eval_('$.users[1].name', item), 'Bob');
+});
+
+test('expr: bracket with implicit root', () => {
+  assert.equal(eval_('users[0]', { users: ['first'] }), 'first');
+});
+
+test('expr: malformed bracket throws', () => {
+  assert.throws(() => parseExpr('$["x"'), /Expected \]/);
+});
