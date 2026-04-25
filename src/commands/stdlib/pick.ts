@@ -19,7 +19,7 @@ export const pickCommand = {
     return `pick — project fields from objects\n\nUsage:\n  ... | pick id,subject,from\n`;
   },
   async run({ input, args }) {
-    const spec = args._[0];
+    const spec = args._.join(',');
     if (!spec) throw new Error('pick requires a comma-separated field list');
     const fields = spec.split(',').map((s) => s.trim()).filter(Boolean);
 
