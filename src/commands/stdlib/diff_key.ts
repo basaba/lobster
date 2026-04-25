@@ -1,0 +1,85 @@
+import { defaultStateDir, keyToPath } from '../../state/store.js';
+import { promises as fsp } from 'node:fs';
+
+async function readKeySet(stateDir: string, stateKey: string): Promise<Set<string>> {
+  const filePath = keyToPath(stateDir, stateKey);
+  try {
+    const text = await fsp.readFile(filePath, 'utf8');
+    const arr = JSON.parse(text);
+    return new Set(Array.isArray(arr) ? arr.map(String) : []);
+  } catch (err: any) {
+    if (err?.code === 'ENOENT') return new Set();
+    throw err;
+  }
+}
+
+async function writeKeySet(stateDir: string, stateKey: string, keys: Set<string>): Promise<void> {
+  await fsp.mkdir(stateDir, { recursive: true });
+  await fsp.writeFile(
+    keyToPath(stateDir, stateKey),
+    JSON.stringify([...keys], null, 2) + '\n',
+    'utf8',
+  );
+}
+
+export const diffKeyCommand = {
+  name: 'diff.key',
+  meta: {
+    description: 'Mark items as new/seen by comparing a key field against stored state',
+    argsSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'State key to track seen values' },
+        field: { type: 'string', description: 'Field name to use as the unique key (default: id)' },
+        _: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['key'],
+    },
+    sideEffects: ['writes_state'],
+  },
+  help() {
+    return [
+      'diff.key — mark items as new/seen by comparing a key field against stored state',
+      '',
+      'Usage:',
+      '  <items> | diff.key --key <stateKey> [--field <fieldName>]',
+      '',
+      'Options:',
+      '  --key    State key to track seen values (required)',
+      '  --field  Field name to use as the unique key (default: id)',
+      '',
+      'Output:',
+      '  Each input item with changed: true (new) or false (seen before)',
+      '',
+      'Example:',
+      '  mail.search --unread | diff.key --key inbox --field id | where changed==true',
+    ].join('\n');
+  },
+  async run({ input, args, ctx }) {
+    const stateKey: string = args.key ?? args._?.[0];
+    if (!stateKey) throw new Error('diff.key requires --key');
+    const field: string = args.field ?? 'id';
+
+    const stateDir = defaultStateDir(ctx.env ?? process.env);
+    const previousKeys = await readKeySet(stateDir, stateKey);
+
+    const items: any[] = [];
+    for await (const item of input) items.push(item);
+
+    const currentKeys = new Set<string>();
+    const output = items.map((item) => {
+      const keyValue = item != null && typeof item === 'object' ? item[field] : item;
+      const keyStr = String(keyValue ?? '');
+      currentKeys.add(keyStr);
+      return { ...item, changed: !previousKeys.has(keyStr) };
+    });
+
+    await writeKeySet(stateDir, stateKey, currentKeys);
+
+    return {
+      output: (async function* () {
+        for (const item of output) yield item;
+      })(),
+    };
+  },
+};

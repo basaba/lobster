@@ -17,6 +17,7 @@ import { llmTaskInvokeCommand } from "./stdlib/llm_task_invoke.js";
 import { stateGetCommand, stateSetCommand } from "./stdlib/state.js";
 import { diffLastCommand } from "./stdlib/diff_last.js";
 import { diffGateCommand } from "./stdlib/diff_gate.js";
+import { diffKeyCommand } from "./stdlib/diff_key.js";
 import { workflowsListCommand } from "./workflows/workflows_list.js";
 import { workflowsRunCommand } from "./workflows/workflows_run.js";
 import { commandsListCommand } from "./commands_list.js";
@@ -51,6 +52,7 @@ export function createDefaultRegistry() {
     stateSetCommand,
     diffLastCommand,
     diffGateCommand,
+    diffKeyCommand,
     workflowsListCommand,
     workflowsRunCommand,
     commandsListCommand,
