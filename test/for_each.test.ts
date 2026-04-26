@@ -90,6 +90,28 @@ test('for_each throws when source is not an array', async () => {
   );
 });
 
+test('for_each tolerates undefined list (resolves to empty)', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify({}))"' },
+      { id: 'loop', for_each: '$data.json.items', steps: [{ id: 'x', command: 'echo hi' }] },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, []);
+});
+
+test('for_each tolerates null list (resolves to empty)', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify({items:null}))"' },
+      { id: 'loop', for_each: '$data.json.items', steps: [{ id: 'x', command: 'echo hi' }] },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, []);
+});
+
 test('for_each validation rejects empty sub-step list', async () => {
   const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'lobster-foreach-'));
   const filePath = path.join(tmpDir, 'bad.lobster');
