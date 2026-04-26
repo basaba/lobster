@@ -755,7 +755,7 @@ export async function runWorkflowFile({
       if (rawItemsRef != null && !Array.isArray(rawItemsRef)) {
         throw new Error(`Workflow step ${step.id} for_each: expected array, got ${typeof rawItemsRef}`);
       }
-      const itemsRef = rawItemsRef ?? [];
+      const itemsRef: unknown[] = (rawItemsRef as unknown[]) ?? [];
       ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — started (for_each, ${itemsRef.length} items)\n`);
 
       const itemVar = step.item_var ?? 'item';
@@ -2100,19 +2100,21 @@ function getValueByPath(value: unknown, pathValue: string) {
 }
 
 type ConditionToken =
-  | { type: 'lparen' | 'rparen' | 'and' | 'or' | 'eq' | 'neq' | 'lt' | 'lte' | 'gt' | 'gte' | 'not' }
+  | { type: 'lparen' | 'rparen' | 'comma' | 'and' | 'or' | 'eq' | 'neq' | 'lt' | 'lte' | 'gt' | 'gte' | 'not' }
   | { type: 'step_ref'; value: { id: string; path: string } }
   | { type: 'string' | 'number' | 'boolean' | 'null' | 'identifier'; value: unknown };
 
 function evaluateConditionExpression(
   expression: string,
   results: Record<string, WorkflowStepResult>,
+  locals: Record<string, unknown> = {},
 ) {
   const tokens = tokenizeCondition(expression);
   if (tokens.length === 0) {
     throw new Error(`Unsupported condition: ${expression}`);
   }
   let index = 0;
+  let currentLocals = { ...locals };
 
   function parseOr(): unknown {
     let left = parseAnd();
@@ -2167,6 +2169,15 @@ function evaluateConditionExpression(
     if (!token) {
       throw new Error(`Unsupported condition: ${expression}`);
     }
+
+    if (token.type === 'identifier' && tokens[index + 1]?.type === 'lparen') {
+      const fnName = token.value as string;
+      if (fnName === 'length' || fnName === 'some' || fnName === 'every') {
+        index += 2; // consume identifier and lparen
+        return parseFunction(fnName);
+      }
+    }
+
     index += 1;
 
     if (token.type === 'lparen') {
@@ -2175,7 +2186,11 @@ function evaluateConditionExpression(
       return value;
     }
     if (token.type === 'step_ref') {
-      return getStepRefValue(token.value, results, true);
+      const ref = token.value as { id: string; path: string };
+      if (ref.id in currentLocals) {
+        return getValueByPath(currentLocals[ref.id], ref.path);
+      }
+      return getStepRefValue(ref, results, true);
     }
     if (token.type === 'string' || token.type === 'number' || token.type === 'boolean' || token.type === 'null') {
       return token.value;
@@ -2184,6 +2199,65 @@ function evaluateConditionExpression(
       return token.value;
     }
     throw new Error(`Unsupported condition: ${expression}`);
+  }
+
+  function parseFunction(fnName: string): unknown {
+    if (fnName === 'length') {
+      const arg = parseOr();
+      expect('rparen');
+      if (arg == null) return 0;
+      if (Array.isArray(arg) || typeof arg === 'string') return (arg as unknown[] | string).length;
+      throw new Error(`length() requires an array or string, got ${typeof arg}`);
+    }
+
+    // some / every
+    const arrayArg = parseOr();
+    expect('comma');
+
+    const iterToken = tokens[index];
+    if (!iterToken || iterToken.type !== 'identifier') {
+      throw new Error(`${fnName}() requires an iterator variable name as second argument`);
+    }
+    const iterVar = iterToken.value as string;
+    index += 1;
+    expect('comma');
+
+    const items = arrayArg == null ? [] : arrayArg;
+    if (!Array.isArray(items)) {
+      throw new Error(`${fnName}() requires an array as first argument, got ${typeof items}`);
+    }
+
+    const predStartIndex = index;
+    const savedLocals = { ...currentLocals };
+
+    if (items.length === 0) {
+      // Dry-run parse to advance index past the predicate
+      currentLocals[iterVar] = null;
+      parseOr();
+      currentLocals = savedLocals;
+      expect('rparen');
+      return fnName === 'every';
+    }
+
+    let result = fnName === 'every';
+    for (let i = 0; i < items.length; i++) {
+      index = predStartIndex;
+      currentLocals[iterVar] = items[i];
+      const predResult = Boolean(parseOr());
+
+      if (fnName === 'some' && predResult) {
+        result = true;
+        break;
+      }
+      if (fnName === 'every' && !predResult) {
+        result = false;
+        break;
+      }
+    }
+
+    currentLocals = savedLocals;
+    expect('rparen');
+    return result;
   }
 
   function match(type: ConditionToken['type']) {
@@ -2244,6 +2318,11 @@ function tokenizeCondition(expression: string): ConditionToken[] {
     }
     if (ch === ')') {
       tokens.push({ type: 'rparen' });
+      index += 1;
+      continue;
+    }
+    if (ch === ',') {
+      tokens.push({ type: 'comma' });
       index += 1;
       continue;
     }

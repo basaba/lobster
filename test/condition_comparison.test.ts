@@ -137,3 +137,149 @@ test('existing == and != still work with new operators', async () => {
   assert.equal(result.status, 'ok');
   assert.deepEqual(result.output, ['good\n']);
 });
+
+// --- length() ---
+
+test('length() returns array length', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify({items:[1,2,3]}))"' },
+      { id: 'check', command: 'echo "has items"', when: 'length($data.json.items) > 0' },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['has items\n']);
+});
+
+test('length() returns 0 for null', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify({items:null}))"' },
+      { id: 'check', command: 'echo "yes"', when: 'length($data.json.items) > 0' },
+      { id: 'fallback', command: 'echo "empty"' },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['empty\n']);
+});
+
+test('length() returns string length', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify({name:\\"hello\\"}))"' },
+      { id: 'check', command: 'echo "long"', when: 'length($data.json.name) == 5' },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['long\n']);
+});
+
+test('length() == 0 skips step for empty array', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify({items:[]}))"' },
+      { id: 'check', command: 'echo "yes"', when: 'length($data.json.items) > 0' },
+      { id: 'fallback', command: 'echo "none"' },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['none\n']);
+});
+
+// --- some() ---
+
+test('some() returns true when any element matches', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: `node -e "process.stdout.write(JSON.stringify({items:[{s:\\"a\\"},{s:\\"ready\\"},{s:\\"b\\"}]}))"` },
+      { id: 'check', command: 'echo "found"', when: 'some($data.json.items, item, $item.s == "ready")' },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['found\n']);
+});
+
+test('some() returns false when no element matches', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: `node -e "process.stdout.write(JSON.stringify({items:[{s:\\"a\\"},{s:\\"b\\"}]}))"` },
+      { id: 'check', command: 'echo "found"', when: 'some($data.json.items, item, $item.s == "ready")' },
+      { id: 'fallback', command: 'echo "none"' },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['none\n']);
+});
+
+test('some() returns false for empty array', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify({items:[]}))"' },
+      { id: 'check', command: 'echo "found"', when: 'some($data.json.items, item, $item.s == "ready")' },
+      { id: 'fallback', command: 'echo "none"' },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['none\n']);
+});
+
+test('some() tolerates null array', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify({items:null}))"' },
+      { id: 'check', command: 'echo "found"', when: 'some($data.json.items, item, $item.s == "ready")' },
+      { id: 'fallback', command: 'echo "none"' },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['none\n']);
+});
+
+// --- every() ---
+
+test('every() returns true when all elements match', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: `node -e "process.stdout.write(JSON.stringify({items:[{v:10},{v:20},{v:30}]}))"` },
+      { id: 'check', command: 'echo "all big"', when: 'every($data.json.items, item, $item.v > 5)' },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['all big\n']);
+});
+
+test('every() returns false when one element fails', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: `node -e "process.stdout.write(JSON.stringify({items:[{v:10},{v:2},{v:30}]}))"` },
+      { id: 'check', command: 'echo "all big"', when: 'every($data.json.items, item, $item.v > 5)' },
+      { id: 'fallback', command: 'echo "not all"' },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['not all\n']);
+});
+
+test('every() returns true for empty array', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify({items:[]}))"' },
+      { id: 'check', command: 'echo "all good"', when: 'every($data.json.items, item, $item.v > 5)' },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['all good\n']);
+});
+
+// --- nested functions ---
+
+test('some() with nested length()', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: `node -e "process.stdout.write(JSON.stringify({items:[{n:\\"ab\\"},{n:\\"abcde\\"},{n:\\"c\\"}]}))"` },
+      { id: 'check', command: 'echo "found long"', when: 'some($data.json.items, item, length($item.n) > 3)' },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['found long\n']);
+});

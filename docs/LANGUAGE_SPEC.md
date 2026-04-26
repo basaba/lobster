@@ -826,7 +826,23 @@ condition: "$data.json.count > 100"                 # alias for when
 ```
 
 **Condition expression operators:** `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!`, `()`.  
-**Operand types:** `$step_id.field` references, string/number/boolean/null literals.
+**Operand types:** `$step_id.field` references, string/number/boolean/null literals.  
+**Functions:**
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `length($ref.field)` | number | Array or string length (`null`/`undefined` → `0`) |
+| `some($ref.field, var, predicate)` | boolean | `true` if any element satisfies predicate |
+| `every($ref.field, var, predicate)` | boolean | `true` if all elements satisfy predicate |
+
+```yaml
+when: length($data.json.items) > 0
+when: some($data.json.items, item, $item.status == "ready")
+when: every($data.json.scores, s, $s.value >= 80)
+when: some($data.json.items, item, length($item.name) > 3)  # nested
+```
+
+In `some`/`every`, the iterator variable (e.g. `item`) is bound to each element and referenced with `$` prefix in the predicate (e.g. `$item.field`). Empty or `null`/`undefined` arrays follow JS semantics: `every([])` → `true`, `some([])` → `false`.
 
 **Skip behavior:** Skipped steps produce `{ id, skipped: true }` with no `stdout`/`json`.
 
