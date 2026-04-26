@@ -117,6 +117,8 @@ export type WorkflowStepResult = {
   skipped?: boolean;
   error?: boolean;
   errorMessage?: string;
+  breakHalt?: boolean;
+  breakMessage?: string;
 };
 
 export type WorkflowRunResult = {
@@ -1123,13 +1125,21 @@ export async function runWorkflowFile({
       }
     }
     results[step.id] = result;
-    lastStepId = step.id;
-    ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — completed (${Date.now() - stepStartMs}ms)\n`);
 
     trackStepCost(costTracker, step.id, result);
     if (workflow.cost_limit) {
       costTracker.checkLimit(workflow.cost_limit, ctx.stderr);
     }
+
+    if (result.breakHalt) {
+      if (result.json !== undefined) lastStepId = step.id;
+      ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — break${result.breakMessage ? ` (${result.breakMessage})` : ''} (${Date.now() - stepStartMs}ms)\n`);
+      break;
+    }
+
+    lastStepId = step.id;
+
+    ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — completed (${Date.now() - stepStartMs}ms)\n`);
 
     if (isApprovalStep(step.approval)) {
       const approval = extractApprovalRequest(step, results[step.id], ctx.env);
@@ -2566,6 +2576,28 @@ async function runPipelineStep({
 
   if (result.halted) {
     const haltedName = result.haltedAt?.stage?.name ?? 'unknown';
+
+    // Detect break command halt — return gracefully instead of throwing
+    const breakItem = result.items.find(
+      (item: any) => item && typeof item === 'object' && item.kind === 'break',
+    );
+    if (breakItem) {
+      const nonBreakItems = result.items.filter(
+        (item: any) => !(item && typeof item === 'object' && item.kind === 'break'),
+      );
+      const normalizedStdout = renderedStdout || serializePipelineItemsToStdout(result.items);
+      const json = nonBreakItems.length
+        ? (nonBreakItems.length === 1 ? nonBreakItems[0] : nonBreakItems)
+        : undefined;
+      return {
+        id: stepId,
+        stdout: normalizedStdout,
+        json,
+        breakHalt: true,
+        breakMessage: (breakItem as any).message,
+      } satisfies WorkflowStepResult;
+    }
+
     if (result.items.length === 1 && result.items[0]?.type === 'approval_request') {
       throw new Error(
         `Workflow step ${stepId} halted for approval inside pipeline stage ${haltedName}. Use a separate approval step in the workflow file.`,

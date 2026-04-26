@@ -26,6 +26,7 @@ import { gogGmailSendCommand } from "./stdlib/gog_gmail_send.js";
 import { emailTriageCommand } from "./stdlib/email_triage.js";
 import { computeCommand } from "./stdlib/compute.js";
 import { emitCommand } from "./stdlib/emit.js";
+import { breakCommand } from "./stdlib/break.js";
 
 export function createDefaultRegistry() {
   const commands = new Map();
@@ -61,6 +62,7 @@ export function createDefaultRegistry() {
     emailTriageCommand,
     computeCommand,
     emitCommand,
+    breakCommand,
   ]) {
     commands.set(cmd.name, cmd);
   }

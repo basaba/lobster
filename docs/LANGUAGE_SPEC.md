@@ -56,7 +56,7 @@ Each stage:
 3. Produces an output stream for the next stage (or halts the pipeline).
 
 A stage result may set:
-- `halt: true` — stops the pipeline (used by `approve`, `diff.gate`).
+- `halt: true` — stops the pipeline (used by `approve`, `diff.gate`, `break`).
 - `rendered: true` — tells human mode the stage already printed output.
 
 ---
@@ -536,6 +536,35 @@ Output: `{ kind: "diff.last", key, changed, before, after }`. **Side effects:** 
 ```
 
 Like `diff.last`, but **halts the pipeline** if data is unchanged. **Side effects:** `writes_state`.
+
+#### `break` — Halt pipeline or workflow
+
+```
+break
+break --message "Nothing to process"
+... | break --message "Done early"
+```
+
+| Arg | Type | Default | Description |
+|-----|------|---------|-------------|
+| `--message` | string | — | Optional reason for breaking |
+
+Halts the pipeline immediately. Any stdin items are passed through as output before halting.
+
+**In workflows**, use as a `pipeline:` step with `when:` for conditional early termination:
+
+```yaml
+steps:
+  - id: data
+    command: "fetch-stuff"
+  - id: guard
+    pipeline: 'break --message "Nothing to process"'
+    when: $data.json.count == 0
+  - id: process          # skipped when guard breaks
+    command: "do-work"
+```
+
+When a break step fires, the workflow returns `status: "ok"` with output from the last completed step before the break. If the break step has `stdin:`, those items become the workflow output instead.
 
 ### Human-in-the-Loop
 
