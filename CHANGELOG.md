@@ -4,6 +4,8 @@ All notable changes to Lobster will be documented in this file.
 
 ## Unreleased
 
+- Make `for_each` tolerate `undefined`/`null` list references by treating them as empty arrays (zero iterations) instead of throwing.
+- Add `length()`, `some()`, and `every()` functions to workflow condition expressions for array-aware conditionals (e.g. `when: some($data.json.items, item, $item.status == "ready")`).
 - Improve workflow resume compatibility for `stateKey` naming by accepting both `workflow_resume_` and `workflow-resume_` prefixes, including cleanup against the resolved on-disk key. Thanks to [@brownetw-ai](https://github.com/brownetw-ai) (PR [#4](https://github.com/openclaw/lobster/pull/4)).
 - Add per-step workflow `retry` policies (`max`, `backoff`, `delay_ms`, `max_delay_ms`, `jitter`) with retry-aware stderr logs and dry-run visibility. Thanks to [@scottgl9](https://github.com/scottgl9) (PR [#84](https://github.com/openclaw/lobster/pull/84)).
 - Add optional approval identity constraints for workflow gates (`approval.initiated_by`, `approval.required_approver`, `approval.require_different_approver`) with resume-time enforcement via `LOBSTER_APPROVAL_APPROVED_BY` and envelope metadata for integrations. Thanks to [@coolmanns](https://github.com/coolmanns) (Issue [#44](https://github.com/openclaw/lobster/issues/44)).

@@ -1,6 +1,6 @@
 {
   "name": "@basaba/lobster",
-  "version": "2026.4.25",
+  "version": "2026.4.26",
   "description": "Workflow runtime for AI agents - deterministic pipelines with approval gates",
   "type": "module",
   "bin": {
