@@ -295,6 +295,23 @@ run: "git clone https://github.com/${repo}.git -b ${branch}"
 - If arg not found, the literal `${name}` is left as-is.
 - Works in: `run`/`command`, `pipeline`, `stdin`, `env`, `cwd`, `workflow` paths.
 
+### Environment Variable Interpolation
+
+Reference host environment variables with `${env:VAR_NAME}`:
+
+```yaml
+run: "deploy --token ${env:DEPLOY_TOKEN} --region ${env:AWS_REGION}"
+cwd: "${env:PROJECT_ROOT}/subdir"
+env:
+  DERIVED: "${env:BASE_URL}/api/v2"
+```
+
+- Syntax: `${env:NAME}` — the `env:` prefix distinguishes from workflow args.
+- If the variable is not set, the literal `${env:NAME}` is left as-is.
+- Works in all the same fields as `${arg_name}`: `run`/`command`, `pipeline`, `stdin`, `env`, `cwd`, `workflow` paths.
+- In `env` blocks, workflow-level vars resolve against the base process env; step-level vars resolve against base + workflow env (no circular refs).
+- Not resolved in `--dry-run` or `graph` output to avoid leaking secrets.
+
 ### Step Reference Substitution
 
 Reference prior step outputs with `$step_id.field`:
@@ -315,7 +332,7 @@ when: $approval.approved == true   # in conditions
 | `$step_id.skipped` | Whether step was skipped |
 
 **Resolution order** in a single expression:
-1. First pass: resolve `${arg_name}` → arg values.
+1. First pass: resolve `${arg_name}` and `${env:VAR}` → arg/env values.
 2. Second pass: resolve `$step_id.field` → step output values.
 
 ---

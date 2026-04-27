@@ -753,7 +753,7 @@ export async function runWorkflowFile({
 
     if (typeof step.for_each === 'string' && Array.isArray(step.steps)) {
       const forEachStartMs = Date.now();
-      const rawItemsRef = resolveInputValue(step.for_each, resolvedArgs, results);
+      const rawItemsRef = resolveInputValue(step.for_each, resolvedArgs, results, ctx.env);
       if (rawItemsRef != null && !Array.isArray(rawItemsRef)) {
         throw new Error(`Workflow step ${step.id} for_each: expected array, got ${typeof rawItemsRef}`);
       }
@@ -793,21 +793,21 @@ export async function runWorkflowFile({
           const subEnv = subStep.env
             ? mergeEnv(loopEnvBase, undefined, subStep.env, resolvedArgs, scopedResults)
             : loopEnvBase;
-          const subCwd = resolveCwd(subStep.cwd ?? step.cwd ?? workflow.cwd, resolvedArgs) ?? ctx.cwd;
+          const subCwd = resolveCwd(subStep.cwd ?? step.cwd ?? workflow.cwd, resolvedArgs, subEnv) ?? ctx.cwd;
           const subExecution = getStepExecution(subStep);
 
           let subResult: WorkflowStepResult;
           if (subExecution.kind === 'shell') {
-            const command = resolveTemplate(subExecution.value, resolvedArgs, scopedResults);
-            const stdinValue = resolveShellStdin(subStep.stdin, resolvedArgs, scopedResults);
+            const command = resolveTemplate(subExecution.value, resolvedArgs, scopedResults, subEnv);
+            const stdinValue = resolveShellStdin(subStep.stdin, resolvedArgs, scopedResults, subEnv);
             const { stdout } = await runShellCommand({ command, stdin: stdinValue, env: subEnv, cwd: subCwd, signal: ctx.signal });
             subResult = { id: subStep.id, stdout, json: parseJson(stdout) };
           } else if (subExecution.kind === 'pipeline') {
             if (!ctx.registry) {
               throw new Error(`Workflow step ${step.id} for_each sub-step ${subStep.id} requires a command registry for pipeline execution`);
             }
-            const pipelineText = resolveTemplate(subExecution.value, resolvedArgs, scopedResults);
-            const inputValue = resolveInputValue(subStep.stdin, resolvedArgs, scopedResults);
+            const pipelineText = resolveTemplate(subExecution.value, resolvedArgs, scopedResults, subEnv);
+            const inputValue = resolveInputValue(subStep.stdin, resolvedArgs, scopedResults, subEnv);
             subResult = await runPipelineStep({
               stepId: subStep.id,
               pipelineText,
@@ -817,7 +817,7 @@ export async function runWorkflowFile({
               cwd: subCwd,
             });
           } else {
-            const inputValue = resolveInputValue(subStep.stdin, resolvedArgs, scopedResults);
+            const inputValue = resolveInputValue(subStep.stdin, resolvedArgs, scopedResults, subEnv);
             subResult = createSyntheticStepResult(subStep.id, inputValue);
           }
 
@@ -858,7 +858,7 @@ export async function runWorkflowFile({
     }
 
     const env = mergeEnv(ctx.env, workflow.env, step.env, resolvedArgs, results);
-    const cwd = resolveCwd(step.cwd ?? workflow.cwd, resolvedArgs) ?? ctx.cwd;
+    const cwd = resolveCwd(step.cwd ?? workflow.cwd, resolvedArgs, env) ?? ctx.cwd;
     const execution = getStepExecution(step);
     const retryConfig = resolveRetryConfig(step.retry);
     const stepStartMs = Date.now();
@@ -896,7 +896,7 @@ export async function runWorkflowFile({
           const runBranch = async (branch: ParallelBranch): Promise<{ branchId: string; result: WorkflowStepResult }> => {
             const mergedBranchEnv = { ...(step.env ?? {}), ...(branch.env ?? {}) };
             const branchEnv = mergeEnv(ctx.env, workflow.env, mergedBranchEnv, resolvedArgs, results);
-            const branchCwd = resolveCwd(branch.cwd ?? step.cwd ?? workflow.cwd, resolvedArgs) ?? ctx.cwd;
+            const branchCwd = resolveCwd(branch.cwd ?? step.cwd ?? workflow.cwd, resolvedArgs, branchEnv) ?? ctx.cwd;
             const branchShell = typeof branch.run === 'string' ? branch.run : branch.command;
             const branchExec = typeof branch.pipeline === 'string' && branch.pipeline.trim()
               ? { kind: 'pipeline' as const, value: branch.pipeline }
@@ -905,8 +905,8 @@ export async function runWorkflowFile({
                 : { kind: 'none' as const });
 
             if (branchExec.kind === 'shell') {
-              const command = resolveTemplate(branchExec.value, resolvedArgs, results);
-              const stdinValue = resolveShellStdin(branch.stdin, resolvedArgs, results);
+              const command = resolveTemplate(branchExec.value, resolvedArgs, results, branchEnv);
+              const stdinValue = resolveShellStdin(branch.stdin, resolvedArgs, results, branchEnv);
               const { stdout } = await runShellCommand({
                 command,
                 stdin: stdinValue,
@@ -922,8 +922,8 @@ export async function runWorkflowFile({
               if (!ctx.registry) {
                 throw new Error(`Parallel branch ${branch.id} requires a command registry for pipeline execution`);
               }
-              const pipelineText = resolveTemplate(branchExec.value, resolvedArgs, results);
-              const inputValue = resolveInputValue(branch.stdin, resolvedArgs, results);
+              const pipelineText = resolveTemplate(branchExec.value, resolvedArgs, results, branchEnv);
+              const inputValue = resolveInputValue(branch.stdin, resolvedArgs, results, branchEnv);
               const branchResult = await runPipelineStep({
                 stepId: branch.id,
                 pipelineText,
@@ -986,7 +986,7 @@ export async function runWorkflowFile({
               : JSON.stringify(merged),
           };
         } else if (execution.kind === 'workflow') {
-          const workflowPath = resolveTemplate(execution.value, resolvedArgs, results);
+          const workflowPath = resolveTemplate(execution.value, resolvedArgs, results, env);
           const resolvedWorkflowPath = path.isAbsolute(workflowPath)
             ? workflowPath
             : path.resolve(path.dirname(resolvedFilePath), workflowPath);
@@ -1002,7 +1002,7 @@ export async function runWorkflowFile({
           }
           const childActive = new Set(activeWorkflows);
           childActive.add(canonicalWorkflowPath);
-          const subArgs = resolveWorkflowStepArgs(step.workflow_args, resolvedArgs, results);
+          const subArgs = resolveWorkflowStepArgs(step.workflow_args, resolvedArgs, results, env);
           const subResult = await runWorkflowFile({
             filePath: resolvedWorkflowPath,
             args: subArgs,
@@ -1030,8 +1030,8 @@ export async function runWorkflowFile({
           const stdout = subResult.output.length ? serializeValueForStdout(json) : '';
           result = { id: step.id, stdout, json };
         } else if (execution.kind === 'shell') {
-          const command = resolveTemplate(execution.value, resolvedArgs, results);
-          const stdinValue = resolveShellStdin(step.stdin, resolvedArgs, results);
+          const command = resolveTemplate(execution.value, resolvedArgs, results, env);
+          const stdinValue = resolveShellStdin(step.stdin, resolvedArgs, results, env);
           const { stdout } = await runShellCommand({
             command,
             stdin: stdinValue,
@@ -1045,8 +1045,8 @@ export async function runWorkflowFile({
           if (!ctx.registry) {
             throw new Error(`Workflow step ${step.id} requires a command registry for pipeline execution`);
           }
-          const pipelineText = resolveTemplate(execution.value, resolvedArgs, results);
-          const inputValue = resolveInputValue(step.stdin, resolvedArgs, results);
+          const pipelineText = resolveTemplate(execution.value, resolvedArgs, results, env);
+          const inputValue = resolveInputValue(step.stdin, resolvedArgs, results, env);
           result = await runPipelineStep({
             stepId: step.id,
             pipelineText,
@@ -1056,7 +1056,7 @@ export async function runWorkflowFile({
             cwd,
           });
         } else {
-          const inputValue = resolveInputValue(step.stdin, resolvedArgs, results);
+          const inputValue = resolveInputValue(step.stdin, resolvedArgs, results, env);
           result = createSyntheticStepResult(step.id, inputValue);
         }
 
@@ -1571,18 +1571,25 @@ function mergeEnv(
     env[`LOBSTER_ARG_${normalized}`] = String(value);
   }
 
-  const apply = (source?: Record<string, string>) => {
+  // Snapshot after arg injection — workflow env resolves against this baseline.
+  const baseSnapshot = { ...env };
+
+  const apply = (source: Record<string, string> | undefined, snapshot: Record<string, string | undefined>) => {
     if (!source) return;
     for (const [key, value] of Object.entries(source)) {
       if (typeof value === 'string') {
-        env[key] = resolveTemplate(value, args, results);
+        env[key] = resolveTemplate(value, args, results, snapshot);
       }
     }
   };
 
-  // Allow explicit env blocks to override injected defaults.
-  apply(workflowEnv);
-  apply(stepEnv);
+  // Workflow env resolves against base snapshot (no circular refs).
+  apply(workflowEnv, baseSnapshot);
+
+  // Step env resolves against base + workflow env (can reference workflow-level vars).
+  const afterWorkflowSnapshot = { ...env };
+  apply(stepEnv, afterWorkflowSnapshot);
+
   return env;
 }
 
@@ -1595,21 +1602,26 @@ function normalizeArgEnvKey(key: string): string | null {
   return normalized || null;
 }
 
-function resolveCwd(cwd: string | undefined, args: Record<string, unknown>) {
+function resolveCwd(
+  cwd: string | undefined,
+  args: Record<string, unknown>,
+  env?: Record<string, string | undefined>,
+) {
   if (!cwd) return undefined;
-  return resolveArgsTemplate(cwd, args);
+  return resolveArgsTemplate(cwd, args, env);
 }
 
 function resolveInputValue(
   stdin: unknown,
   args: Record<string, unknown>,
   results: Record<string, WorkflowStepResult>,
+  env?: Record<string, string | undefined>,
 ) {
   if (stdin === null || stdin === undefined) return null;
   if (typeof stdin === 'string') {
     const ref = parseStepRef(stdin.trim());
     if (ref) return getStepRefValue(ref, results, true);
-    return resolveTemplate(stdin, args, results);
+    return resolveTemplate(stdin, args, results, env);
   }
   return stdin;
 }
@@ -1618,8 +1630,9 @@ function resolveShellStdin(
   stdin: unknown,
   args: Record<string, unknown>,
   results: Record<string, WorkflowStepResult>,
+  env?: Record<string, string | undefined>,
 ) {
-  const value = resolveInputValue(stdin, args, results);
+  const value = resolveInputValue(stdin, args, results, env);
   return encodeShellInput(value);
 }
 
@@ -1627,8 +1640,9 @@ function resolveTemplate(
   input: string,
   args: Record<string, unknown>,
   results: Record<string, WorkflowStepResult>,
+  env?: Record<string, string | undefined>,
 ) {
-  const withArgs = resolveArgsTemplate(input, args);
+  const withArgs = resolveArgsTemplate(input, args, env);
   return resolveStepRefs(withArgs, results);
 }
 
@@ -1636,12 +1650,13 @@ function resolveWorkflowStepArgs(
   workflowArgs: Record<string, unknown> | undefined,
   parentArgs: Record<string, unknown>,
   results: Record<string, WorkflowStepResult>,
+  env?: Record<string, string | undefined>,
 ): Record<string, unknown> {
   if (!workflowArgs) return {};
   const resolved: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(workflowArgs)) {
     if (typeof value === 'string') {
-      resolved[key] = resolveTemplate(value, parentArgs, results);
+      resolved[key] = resolveTemplate(value, parentArgs, results, env);
     } else {
       resolved[key] = value;
     }
@@ -1649,8 +1664,16 @@ function resolveWorkflowStepArgs(
   return resolved;
 }
 
-function resolveArgsTemplate(input: string, args: Record<string, unknown>) {
-  return input.replace(/\$\{([A-Za-z0-9_-]+)\}/g, (match, key) => {
+function resolveArgsTemplate(
+  input: string,
+  args: Record<string, unknown>,
+  env?: Record<string, string | undefined>,
+) {
+  return input.replace(/\$\{(?:(env):)?([A-Za-z0-9_-]+)\}/g, (match, prefix, key) => {
+    if (prefix === 'env') {
+      if (env && key in env) return String(env[key] ?? '');
+      return match;
+    }
     if (key in args) return String(args[key]);
     return match;
   });
