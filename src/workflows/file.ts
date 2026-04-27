@@ -119,6 +119,7 @@ export type WorkflowStepResult = {
   errorMessage?: string;
   breakHalt?: boolean;
   breakMessage?: string;
+  diffGateHalt?: boolean;
 };
 
 export type WorkflowRunResult = {
@@ -1141,6 +1142,12 @@ export async function runWorkflowFile({
     if (result.breakHalt) {
       if (result.json !== undefined) lastStepId = step.id;
       ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — break${result.breakMessage ? ` (${result.breakMessage})` : ''} (${Date.now() - stepStartMs}ms)\n`);
+      break;
+    }
+
+    if (result.diffGateHalt) {
+      lastStepId = step.id;
+      ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — diff.gate halted (unchanged) (${Date.now() - stepStartMs}ms)\n`);
       break;
     }
 
@@ -2625,6 +2632,21 @@ async function runPipelineStep({
         json,
         breakHalt: true,
         breakMessage: (breakItem as any).message,
+      } satisfies WorkflowStepResult;
+    }
+
+    // Detect diff.gate halt — return gracefully instead of throwing
+    const diffGateItem = result.items.find(
+      (item: any) => item && typeof item === 'object' && item.kind === 'diff.gate',
+    );
+    if (diffGateItem) {
+      const normalizedStdout = renderedStdout || serializePipelineItemsToStdout(result.items);
+      const json = result.items.length === 1 ? result.items[0] : result.items;
+      return {
+        id: stepId,
+        stdout: normalizedStdout,
+        json,
+        diffGateHalt: true,
       } satisfies WorkflowStepResult;
     }
 
