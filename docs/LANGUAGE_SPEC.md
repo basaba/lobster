@@ -733,6 +733,9 @@ args:                                  # optional — parameter definitions
   branch:
     description: "Git branch"
     default: "main"
+  token:
+    description: "Deploy token"
+    default: "${env:DEPLOY_TOKEN}"     # default from env var
 env:                                   # optional — env vars for all steps
   API_KEY: "secret"
   REPO: "${repo}"                      # supports arg interpolation

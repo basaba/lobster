@@ -192,3 +192,77 @@ test('workflow ${arg} still works alongside ${env:VAR}', async () => {
   assert.equal(result.status, 'ok');
   assert.deepEqual(result.output, ['hello world']);
 });
+
+test('workflow arg defaults resolve ${env:VAR}', async () => {
+  const workflow = {
+    name: 'env-arg-default',
+    args: {
+      token: { default: '${env:MY_SECRET_TOKEN}' },
+    },
+    steps: [
+      {
+        id: 'echo',
+        command: 'node -e "process.stdout.write(process.argv[1])" -- "${token}"',
+      },
+    ],
+  };
+
+  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'lobster-env-ref-'));
+  const stateDir = path.join(tmpDir, 'state');
+  const filePath = path.join(tmpDir, 'workflow.lobster');
+  await fsp.writeFile(filePath, JSON.stringify(workflow, null, 2), 'utf8');
+
+  const env = { ...process.env, LOBSTER_STATE_DIR: stateDir, MY_SECRET_TOKEN: 'secret123' };
+
+  const result = await runWorkflowFile({
+    filePath,
+    args: {},
+    ctx: {
+      stdin: process.stdin,
+      stdout: process.stdout,
+      stderr: process.stderr,
+      env,
+      mode: 'tool',
+    },
+  });
+
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['secret123']);
+});
+
+test('workflow arg default ${env:VAR} is overridden by provided arg', async () => {
+  const workflow = {
+    name: 'env-arg-override',
+    args: {
+      token: { default: '${env:MY_SECRET_TOKEN}' },
+    },
+    steps: [
+      {
+        id: 'echo',
+        command: 'node -e "process.stdout.write(process.argv[1])" -- "${token}"',
+      },
+    ],
+  };
+
+  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'lobster-env-ref-'));
+  const stateDir = path.join(tmpDir, 'state');
+  const filePath = path.join(tmpDir, 'workflow.lobster');
+  await fsp.writeFile(filePath, JSON.stringify(workflow, null, 2), 'utf8');
+
+  const env = { ...process.env, LOBSTER_STATE_DIR: stateDir, MY_SECRET_TOKEN: 'secret123' };
+
+  const result = await runWorkflowFile({
+    filePath,
+    args: { token: 'explicit-value' },
+    ctx: {
+      stdin: process.stdin,
+      stdout: process.stdout,
+      stderr: process.stderr,
+      env,
+      mode: 'tool',
+    },
+  });
+
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.output, ['explicit-value']);
+});

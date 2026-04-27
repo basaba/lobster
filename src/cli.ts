@@ -113,7 +113,7 @@ async function handleGraph({ argv }) {
 
   try {
     const workflow = await loadWorkflowFile(filePath);
-    const args = resolveWorkflowArgs(workflow.args, argsJson);
+    const args = resolveWorkflowArgs(workflow.args, argsJson); // No env — graph should not leak secrets
     const graph = renderWorkflowGraph({ workflow, format: parsed.format, args });
     process.stdout.write(graph);
     process.stdout.write('\n');

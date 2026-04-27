@@ -537,12 +537,19 @@ export async function loadWorkflowFile(filePath: string): Promise<WorkflowFile> 
 export function resolveWorkflowArgs(
   argDefs: WorkflowFile['args'],
   provided: Record<string, unknown> | undefined,
+  env?: Record<string, string | undefined>,
 ) {
   const resolved: Record<string, unknown> = {};
   if (argDefs) {
     for (const [key, def] of Object.entries(argDefs)) {
       if (def && typeof def === 'object' && 'default' in def) {
-        resolved[key] = def.default;
+        const defaultVal = def.default;
+        // Resolve ${env:VAR} in string defaults
+        if (typeof defaultVal === 'string' && env) {
+          resolved[key] = resolveArgsTemplate(defaultVal, {}, env);
+        } else {
+          resolved[key] = defaultVal;
+        }
       }
     }
   }
@@ -614,7 +621,7 @@ export async function runWorkflowFile({
   ctx._activeWorkflows.add(canonicalFilePath);
   try {
     const workflow = await loadWorkflowFile(resolvedFilePath);
-    const resolvedArgs = resolveWorkflowArgs(workflow.args, args ?? resumeState?.args);
+    const resolvedArgs = resolveWorkflowArgs(workflow.args, args ?? resumeState?.args, ctx.env);
     const steps = workflow.steps;
     const stepIndexById = new Map(steps.map((step, idx) => [step.id, idx]));
     const results: Record<string, WorkflowStepResult> = resumeState?.steps
