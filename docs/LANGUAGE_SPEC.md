@@ -589,6 +589,38 @@ steps:
 
 When a break step fires, the workflow returns `status: "ok"` with output from the last completed step before the break. If the break step has `stdin:`, those items become the workflow output instead.
 
+#### `gate` — Conditional pipeline halt
+
+```
+... | gate --when empty
+... | gate --when not_empty --message "Items found"
+... | gate --when "length($) > 10"
+... | gate --when "some($, @.status == \"failed\")"
+```
+
+| Arg | Type | Default | Description |
+|-----|------|---------|-------------|
+| `--when` | string | — | Condition: `empty`, `not_empty`, or an expression using `$` (items array) |
+| `--message` | string | — | Optional reason for halting |
+
+Collects all input items, evaluates the condition, and **halts the pipeline** if the condition is true. Input items are passed through as output whether or not the gate halts.
+
+Built-in conditions: `empty` (halt when no items), `not_empty` (halt when items exist).
+Expression conditions use the expression engine with `$` bound to the collected items array and `@` for per-element access in functions like `some()`, `every()`, `count()`.
+
+**In workflows**, use as a `pipeline:` step with `stdin:` for conditional early termination:
+
+```yaml
+steps:
+  - id: data
+    command: "fetch-items"
+  - id: guard
+    pipeline: 'gate --when empty --message "Nothing to process"'
+    stdin: $data.json
+  - id: process          # skipped when guard halts
+    command: "do-work"
+```
+
 ### Human-in-the-Loop
 
 #### `approve` — Approval gate

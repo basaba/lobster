@@ -27,6 +27,7 @@ import { emailTriageCommand } from "./stdlib/email_triage.js";
 import { computeCommand } from "./stdlib/compute.js";
 import { emitCommand } from "./stdlib/emit.js";
 import { breakCommand } from "./stdlib/break.js";
+import { gateCommand } from "./stdlib/gate.js";
 
 export function createDefaultRegistry() {
   const commands = new Map();
@@ -63,6 +64,7 @@ export function createDefaultRegistry() {
     computeCommand,
     emitCommand,
     breakCommand,
+    gateCommand,
   ]) {
     commands.set(cmd.name, cmd);
   }
