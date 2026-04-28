@@ -762,10 +762,17 @@ export async function runWorkflowFile({
     if (typeof step.for_each === 'string' && Array.isArray(step.steps)) {
       const forEachStartMs = Date.now();
       const rawItemsRef = resolveInputValue(step.for_each, resolvedArgs, results, ctx.env);
-      if (rawItemsRef != null && !Array.isArray(rawItemsRef)) {
-        throw new Error(`Workflow step ${step.id} for_each: expected array, got ${typeof rawItemsRef}`);
+      let itemsRef: unknown[];
+      if (rawItemsRef == null) {
+        itemsRef = [];
+      } else if (Array.isArray(rawItemsRef)) {
+        itemsRef = rawItemsRef;
+      } else if (typeof rawItemsRef === 'object') {
+        // Single object → treat as one-element array for convenience
+        itemsRef = [rawItemsRef];
+      } else {
+        throw new Error(`Workflow step ${step.id} for_each: expected array or object, got ${typeof rawItemsRef}`);
       }
-      const itemsRef: unknown[] = (rawItemsRef as unknown[]) ?? [];
       ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — started (for_each, ${itemsRef.length} items)\n`);
 
       const itemVar = step.item_var ?? 'item';

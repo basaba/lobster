@@ -813,7 +813,7 @@ Sub-workflows cannot contain approval/input gates. Circular dependencies are det
 
 ```yaml
 - id: process
-  for_each: $fetch.json        # must resolve to array
+  for_each: $fetch.json        # must resolve to array or object (object → [object])
   item_var: "item"             # default: "item"
   index_var: "index"           # default: "index"
   batch_size: 5                # optional: items per batch
@@ -825,7 +825,7 @@ Sub-workflows cannot contain approval/input gates. Circular dependencies are det
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `for_each` | string | — | Reference to array (e.g. `$step.json`) |
+| `for_each` | string | — | Reference to array or object (e.g. `$step.json`). A single object is treated as a one-element array. |
 | `item_var` | string | `"item"` | Variable name for current item |
 | `index_var` | string | `"index"` | Variable name for 0-based index |
 | `include_unmatched` | boolean | `false` | Keep iterations where all sub-steps were skipped |

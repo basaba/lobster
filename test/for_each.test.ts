@@ -78,15 +78,32 @@ test('for_each supports custom item_var and index_var', async () => {
   ]);
 });
 
-test('for_each throws when source is not an array', async () => {
+test('for_each wraps single object as one-element array', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify({x:1}))"' },
+      {
+        id: 'loop',
+        for_each: '$data.json',
+        steps: [{ id: 'emit', command: 'node -e "process.stdout.write(JSON.stringify({val: $item.json.x}))"' }],
+      },
+    ],
+  });
+  assert.equal(result.status, 'ok');
+  const output = result.output as any[];
+  assert.equal(output.length, 1);
+  assert.equal(output[0].emit.val, 1);
+});
+
+test('for_each throws when source is a non-object primitive', async () => {
   await assert.rejects(
     () => runWorkflow({
       steps: [
-        { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify({x:1}))"' },
+        { id: 'data', command: 'node -e "process.stdout.write(JSON.stringify(42))"' },
         { id: 'loop', for_each: '$data.json', steps: [{ id: 'x', command: 'echo hi' }] },
       ],
     }),
-    /for_each: expected array/,
+    /for_each: expected array or object/,
   );
 });
 
