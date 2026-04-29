@@ -122,6 +122,13 @@ export type WorkflowStepResult = {
   diffGateHalt?: boolean;
   gateHalt?: boolean;
   gateMessage?: string;
+  approvalHalt?: boolean;
+  approvalRequest?: {
+    type: 'approval_request';
+    prompt: string;
+    items: unknown[];
+    preview?: string;
+  };
 };
 
 export type WorkflowRunResult = {
@@ -1091,7 +1098,7 @@ export async function runWorkflowFile({
           signal: ctx.signal,
           shouldRetry: (error) => {
             const message = error?.message ?? String(error);
-            return !/halted (for approval inside|before completion at) pipeline/.test(message);
+            return !/halted before completion at pipeline/.test(message);
           },
           onRetry: (attempt, error, delayMs) => {
             ctx.stderr.write(
@@ -1106,7 +1113,7 @@ export async function runWorkflowFile({
       if (ctx.signal?.aborted && (err?.name === 'AbortError' || err?.code === 'ABORT_ERR')) {
         throw err;
       }
-      if (err?.message && /halted (for approval inside|before completion at) pipeline/.test(err.message)) {
+      if (err?.message && /halted before completion at pipeline/.test(err.message)) {
         throw err;
       }
 
@@ -1164,6 +1171,65 @@ export async function runWorkflowFile({
       if (result.json !== undefined) lastStepId = step.id;
       ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — gate halted${result.gateMessage ? ` (${result.gateMessage})` : ''} (${Date.now() - stepStartMs}ms)\n`);
       break;
+    }
+
+    // Inline pipeline approve — handle like step-level approval
+    if (result.approvalHalt && result.approvalRequest) {
+      lastStepId = step.id;
+      ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — approval pending (${Date.now() - stepStartMs}ms)\n`);
+
+      if (ctx.mode === 'tool' || !isInteractive(ctx.stdin)) {
+        const stateKey = await saveWorkflowResumeState(ctx.env, {
+          filePath: resolvedFilePath,
+          resumeAtIndex: idx + 1,
+          steps: results,
+          args: resolvedArgs,
+          approvalStepId: step.id,
+          createdAt: new Date().toISOString(),
+        });
+
+        let approvalId: string;
+        try {
+          approvalId = await createApprovalIndex({ env: ctx.env, stateKey });
+        } catch (err) {
+          await deleteStateJson({ env: ctx.env, key: stateKey }).catch(() => {});
+          throw err;
+        }
+
+        if (consumedResumeStateKey && consumedResumeStateKey !== stateKey) {
+          await deleteStateJson({ env: ctx.env, key: consumedResumeStateKey });
+        }
+
+        const resumeToken = encodeToken({
+          protocolVersion: 1,
+          v: 1,
+          kind: 'workflow-file',
+          stateKey,
+        } satisfies WorkflowResumePayload);
+
+        return {
+          status: 'needs_approval',
+          output: [],
+          requiresApproval: {
+            type: 'approval_request',
+            prompt: result.approvalRequest.prompt,
+            items: result.approvalRequest.items,
+            ...(result.approvalRequest.preview ? { preview: result.approvalRequest.preview } : null),
+            resumeToken,
+            approvalId,
+          },
+        } satisfies WorkflowRunResult;
+      }
+
+      // Interactive mode: prompt on the real stdout
+      ctx.stdout.write(`${result.approvalRequest.prompt} [y/N] `);
+      const answer = await readLineFromStream(ctx.stdin, {
+        timeoutMs: parseApprovalTimeoutMs(ctx.env),
+      });
+      if (!/^y(es)?$/i.test(String(answer).trim())) {
+        throw new Error('Not approved');
+      }
+      results[step.id].approved = true;
     }
 
     lastStepId = step.id;
@@ -2687,9 +2753,24 @@ async function runPipelineStep({
     }
 
     if (result.items.length === 1 && result.items[0]?.type === 'approval_request') {
-      throw new Error(
-        `Workflow step ${stepId} halted for approval inside pipeline stage ${haltedName}. Use a separate approval step in the workflow file.`,
-      );
+      const approval = result.items[0] as {
+        type: 'approval_request';
+        prompt: string;
+        items: unknown[];
+        preview?: string;
+      };
+      const approvalItems = approval.items ?? [];
+      const normalizedStdout = renderedStdout || serializePipelineItemsToStdout(approvalItems);
+      const json = approvalItems.length
+        ? (approvalItems.length === 1 ? approvalItems[0] : approvalItems)
+        : undefined;
+      return {
+        id: stepId,
+        stdout: normalizedStdout,
+        json,
+        approvalHalt: true,
+        approvalRequest: approval,
+      } satisfies WorkflowStepResult;
     }
     throw new Error(`Workflow step ${stepId} halted before completion at pipeline stage ${haltedName}`);
   }

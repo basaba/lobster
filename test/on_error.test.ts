@@ -139,16 +139,16 @@ test('on_error: continue preserves output when final step fails', async () => {
   assert.deepEqual(result.output, [{ ok: true }]);
 });
 
-test('pipeline approval halts bypass on_error handling', async () => {
-  await assert.rejects(
-    () => runWorkflow({
-      steps: [
-        { id: 'gate', pipeline: "approve --prompt 'Proceed?'", on_error: 'continue' },
-        { id: 'after', command: 'echo should-not-run' },
-      ],
-    }),
-    /halted for approval inside pipeline/,
-  );
+test('pipeline inline approve returns needs_approval in tool mode', async () => {
+  const result = await runWorkflow({
+    steps: [
+      { id: 'gate', pipeline: "approve --prompt 'Proceed?'" },
+      { id: 'after', command: 'echo should-not-run' },
+    ],
+  });
+  assert.equal(result.status, 'needs_approval');
+  assert.ok(result.requiresApproval);
+  assert.equal(result.requiresApproval!.prompt, 'Proceed?');
 });
 
 test('external abort propagates even with on_error: continue', async () => {
