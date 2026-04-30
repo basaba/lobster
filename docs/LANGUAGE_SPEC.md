@@ -560,6 +560,29 @@ Output: `{ kind: "diff.last", key, changed, before, after }`. **Side effects:** 
 
 Like `diff.last`, but **halts the pipeline** if data is unchanged. **Side effects:** `writes_state`.
 
+#### `diff.key` — Mark items as new/seen by key
+
+```
+<items> | diff.key --key <stateKey> [--field <fieldName> ...]
+```
+
+Compares each item's key field(s) against stored state. Outputs each item with `changed: true` (new) or `changed: false` (seen before). **Side effects:** `writes_state`.
+
+| Arg | Type | Default | Description |
+|-----|------|---------|-------------|
+| `--key` | string | — | State key to track seen values (required) |
+| `--field` | string \| string[] | `id` | Field name(s) for the unique key |
+
+`--field` supports multiple fields to form a composite key:
+
+```
+# Array form (multiple --field flags)
+<items> | diff.key --key prs --field owner --field repo --field number
+
+# Comma-separated form
+<items> | diff.key --key prs --field owner,repo,number
+```
+
 #### `break` — Halt pipeline or workflow
 
 ```

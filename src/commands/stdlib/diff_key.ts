@@ -22,6 +22,22 @@ async function writeKeySet(stateDir: string, stateKey: string, keys: Set<string>
   );
 }
 
+function normalizeFields(arg: unknown): string[] {
+  if (Array.isArray(arg)) {
+    return arg.flatMap((v) => String(v).split(',').map((s) => s.trim()).filter(Boolean));
+  }
+  if (typeof arg === 'string') {
+    return arg.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return ['id'];
+}
+
+function compositeKey(item: unknown, fields: string[]): string {
+  if (item == null || typeof item !== 'object') return String(item ?? '');
+  if (fields.length === 1) return String((item as any)[fields[0]] ?? '');
+  return fields.map((f) => String((item as any)[f] ?? '')).join('\0');
+}
+
 export const diffKeyCommand = {
   name: 'diff.key',
   meta: {
@@ -30,7 +46,12 @@ export const diffKeyCommand = {
       type: 'object',
       properties: {
         key: { type: 'string', description: 'State key to track seen values' },
-        field: { type: 'string', description: 'Field name to use as the unique key (default: id)' },
+        field: {
+          oneOf: [
+            { type: 'string', description: 'Field name to use as the unique key (default: id)' },
+            { type: 'array', items: { type: 'string' }, description: 'Multiple field names to form a composite key' },
+          ],
+        },
         _: { type: 'array', items: { type: 'string' } },
       },
       required: ['key'],
@@ -42,23 +63,27 @@ export const diffKeyCommand = {
       'diff.key — mark items as new/seen by comparing a key field against stored state',
       '',
       'Usage:',
-      '  <items> | diff.key --key <stateKey> [--field <fieldName>]',
+      '  <items> | diff.key --key <stateKey> [--field <fieldName> ...]',
       '',
       'Options:',
       '  --key    State key to track seen values (required)',
-      '  --field  Field name to use as the unique key (default: id)',
+      '  --field  Field name(s) to use as the unique key (default: id)',
+      '          Pass multiple times or comma-separated for composite keys:',
+      '            --field owner --field repo',
+      '            --field owner,repo',
       '',
       'Output:',
       '  Each input item with changed: true (new) or false (seen before)',
       '',
       'Example:',
       '  mail.search --unread | diff.key --key inbox --field id | where changed==true',
+      '  gh.pulls | diff.key --key prs --field owner,repo,number | where changed==true',
     ].join('\n');
   },
   async run({ input, args, ctx }) {
     const stateKey: string = args.key ?? args._?.[0];
     if (!stateKey) throw new Error('diff.key requires --key');
-    const field: string = args.field ?? 'id';
+    const fields = normalizeFields(args.field);
 
     const stateDir = defaultStateDir(ctx.env ?? process.env);
     const previousKeys = await readKeySet(stateDir, stateKey);
@@ -68,8 +93,7 @@ export const diffKeyCommand = {
 
     const currentKeys = new Set<string>();
     const output = items.map((item) => {
-      const keyValue = item != null && typeof item === 'object' ? item[field] : item;
-      const keyStr = String(keyValue ?? '');
+      const keyStr = compositeKey(item, fields);
       currentKeys.add(keyStr);
       return { ...item, changed: !previousKeys.has(keyStr) };
     });
