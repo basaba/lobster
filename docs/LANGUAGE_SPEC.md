@@ -403,6 +403,21 @@ command exits. The child process can read `LOBSTER_STDIN_FILE` to find the file 
 
 **Side effects:** `local_exec`
 
+#### `emit` — Emit literal values as stream items
+
+```
+emit hello world
+emit --json '{"a":1}' '{"b":2}'
+emit --json '[1,2,3]'
+```
+
+| Arg | Type | Description |
+|-----|------|-------------|
+| `_` (positional) | array | Values to emit |
+| `--json` | boolean | Parse each positional argument as JSON |
+
+Without `--json`, each argument is emitted as a plain string item. With `--json`, each argument is parsed as JSON before being emitted. If no arguments are given, emits nothing (empty stream). No side effects.
+
 #### `json` — Render output as JSON
 
 ```
