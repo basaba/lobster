@@ -34,10 +34,26 @@ function compare(left, op, right) {
   }
 }
 
+function parseCompound(expr) {
+  // Split on || first (lower precedence), then && within each branch
+  const orBranches = expr.split('||').map((s) => s.trim());
+  return orBranches.map((branch) => {
+    const andParts = branch.split('&&').map((s) => s.trim()).filter(Boolean);
+    return andParts.map(parsePredicate);
+  });
+}
+
+function evalCompound(item, branches) {
+  // OR of ANDs: at least one branch must have all predicates true
+  return branches.some((andPreds) =>
+    andPreds.every((pred) => compare(getPath(item, pred.path), pred.op, pred.value))
+  );
+}
+
 export const whereCommand = {
   name: 'where',
   meta: {
-    description: 'Filter objects by a simple predicate',
+    description: 'Filter objects by a predicate',
     argsSchema: {
       type: 'object',
       properties: {
@@ -52,18 +68,30 @@ export const whereCommand = {
     sideEffects: [],
   },
   help() {
-    return `where — filter objects by a simple predicate\n\nUsage:\n  ... | where unread=true\n  ... | where minutes>=30\n  ... | where sender.domain==example.com\n`;
+    return (
+      `where — filter objects by a predicate\n\n` +
+      `Usage:\n` +
+      `  ... | where unread=true\n` +
+      `  ... | where minutes>=30\n` +
+      `  ... | where sender.domain==example.com\n` +
+      `  ... | where "x>5 && y<6"\n` +
+      `  ... | where "status=active || priority>3"\n\n` +
+      `Notes:\n` +
+      `  - && (AND) and || (OR) combine multiple predicates.\n` +
+      `  - && binds tighter than ||.\n` +
+      `  - Quote the expression when using && or ||.\n`
+    );
   },
   async run({ input, args }) {
-    const expr = args._[0];
+    const expr = args._.join(' ');
     if (!expr) throw new Error('where requires an expression (e.g. field=value)');
-    const pred = parsePredicate(expr);
+
+    const branches = parseCompound(expr);
 
     return {
       output: (async function* () {
         for await (const item of input) {
-          const left = getPath(item, pred.path);
-          if (compare(left, pred.op, pred.value)) yield item;
+          if (evalCompound(item, branches)) yield item;
         }
       })(),
     };

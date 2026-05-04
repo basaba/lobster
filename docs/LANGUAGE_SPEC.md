@@ -458,11 +458,16 @@ Supports `{{path}}`, `{{path \| filter}}`, `{{.}}` (whole item).
 ... | where status=active
 ... | where minutes>=30
 ... | where sender.domain==example.com
+... | where "x>5 && y<6"
+... | where "status=active || priority>3"
 ```
 
 Predicate syntax: `field op value`
 
 Operators: `=` (alias for `==`), `==`, `!=`, `<`, `<=`, `>`, `>=`
+
+Combine predicates with `&&` (AND) and `||` (OR). `&&` binds tighter than `||`.
+Quote the expression when using `&&` or `||`.
 
 Value auto-parsing: `true`/`false` → boolean, `null` → null, numeric → number, else string.
 
