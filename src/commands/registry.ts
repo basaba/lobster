@@ -1,5 +1,6 @@
 import { execCommand } from "./stdlib/exec.js";
 import { headCommand } from "./stdlib/head.js";
+import { tailCommand } from "./stdlib/tail.js";
 import { jsonCommand } from "./stdlib/json.js";
 import { pickCommand } from "./stdlib/pick.js";
 import { tableCommand } from "./stdlib/table.js";
@@ -35,6 +36,7 @@ export function createDefaultRegistry() {
   for (const cmd of [
     execCommand,
     headCommand,
+    tailCommand,
     jsonCommand,
     pickCommand,
     tableCommand,

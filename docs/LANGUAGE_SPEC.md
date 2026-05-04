@@ -482,6 +482,14 @@ Comma-separated list of field names to keep.
 
 Default: 10 items.
 
+#### `tail` — Take last N items
+
+```
+... | tail --n 5
+```
+
+Default: 10 items.
+
 #### `dedupe` — Remove duplicates
 
 ```
