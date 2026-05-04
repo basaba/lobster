@@ -470,9 +470,10 @@ Value auto-parsing: `true`/`false` → boolean, `null` → null, numeric → num
 
 ```
 ... | pick id,subject,from
+... | pick author=from,title
 ```
 
-Comma-separated list of field names to keep.
+Comma-separated list of field names to keep. Use `newName=oldName` to rename a field in the output.
 
 #### `head` — Take first N items
 
