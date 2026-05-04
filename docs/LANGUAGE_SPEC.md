@@ -471,9 +471,12 @@ Value auto-parsing: `true`/`false` → boolean, `null` → null, numeric → num
 ```
 ... | pick id,subject,from
 ... | pick author=from,title
+... | pick pr.number
+... | pick num=pr.number
 ```
 
 Comma-separated list of field names to keep. Use `newName=oldName` to rename a field in the output.
+Dot-path access is supported for nested properties (e.g. `pr.number` outputs as `number`). Use `name=dot.path` to choose a custom output name.
 
 #### `head` — Take first N items
 
