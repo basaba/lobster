@@ -366,6 +366,7 @@ const BUILTIN_FUNCTIONS: Record<string, (args: ASTNode[], ctx: EvalContext) => u
     const val = evalNode(args[0], ctx);
     if (Array.isArray(val)) return val.length;
     if (typeof val === 'string') return val.length;
+    if (val !== null && typeof val === 'object') return 1;
     return 0;
   },
 

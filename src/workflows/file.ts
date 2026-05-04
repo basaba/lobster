@@ -2335,7 +2335,7 @@ function evaluateConditionExpression(
       expect('rparen');
       if (arg == null) return 0;
       if (Array.isArray(arg) || typeof arg === 'string') return (arg as unknown[] | string).length;
-      throw new Error(`length() requires an array or string, got ${typeof arg}`);
+      if (typeof arg === 'object') return 1;
     }
 
     // some / every

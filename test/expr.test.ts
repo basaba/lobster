@@ -97,6 +97,13 @@ test('expr: length()', () => {
   assert.equal(eval_('length(x)', {}), 0);
 });
 
+test('expr: length() with object returns 1', () => {
+  assert.equal(eval_('length(obj)', { obj: { a: 1, b: 2 } }), 1);
+  assert.equal(eval_('length(obj)', { obj: {} }), 1);
+  assert.equal(eval_('length(obj)', { obj: { nested: { x: 1 } } }), 1);
+  assert.equal(eval_('length(obj)', { obj: null }), 0);
+});
+
 test('expr: every() with @ scoping', () => {
   const item = { votes: [0, 0, 0] };
   assert.equal(eval_('every(votes, @ == 0)', item), true);
