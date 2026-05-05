@@ -501,6 +501,14 @@ Default: 10 items.
 
 Default: 10 items.
 
+#### `count` — Count items
+
+```
+... | count
+```
+
+Outputs a single item: `{ count: <number> }`.
+
 #### `dedupe` — Remove duplicates
 
 ```
@@ -616,6 +624,19 @@ Compares each item's key field(s) against stored state. Outputs each item with `
 # Comma-separated form
 <items> | diff.key --key prs --field owner,repo,number
 ```
+
+#### `diff.key.exists` — Check items against diff.key state (read-only)
+
+```
+<items> | diff.key.exists --key <stateKey> [--field <fieldName> ...]
+```
+
+Like `diff.key`, but does **not** update the stored state. Outputs each item with `changed: true` (not in state) or `changed: false` (already in state). No side effects.
+
+| Arg | Type | Default | Description |
+|-----|------|---------|-------------|
+| `--key` | string | — | State key to check against (required) |
+| `--field` | string \| string[] | `id` | Field name(s) for the unique key |
 
 #### `break` — Halt pipeline or workflow
 
