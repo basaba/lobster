@@ -44,7 +44,8 @@ export const computeCommand = {
       `  Operators: + - * / % == != < <= > >= && || !\n` +
       `  Functions: length, every, some, count, concat, lower, upper,\n` +
       `             trim, contains, starts_with, ends_with, now,\n` +
-      `             days_since, hours_since, coalesce, is_null, exists\n`
+      `             days_since, hours_since, coalesce, is_null, exists,\n` +
+      `             iff(condition, trueVal, falseVal)\n`
     );
   },
   async run({ input, args }: any) {

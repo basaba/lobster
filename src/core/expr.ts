@@ -482,6 +482,12 @@ const BUILTIN_FUNCTIONS: Record<string, (args: ASTNode[], ctx: EvalContext) => u
     if (args.length !== 1) throw new Error('exists() requires exactly 1 argument');
     return evalNode(args[0], ctx) !== undefined;
   },
+
+  iff(args, ctx) {
+    if (args.length !== 3) throw new Error('iff() requires exactly 3 arguments: condition, valueIfTrue, valueIfFalse');
+    const cond = evalNode(args[0], ctx);
+    return cond ? evalNode(args[1], ctx) : evalNode(args[2], ctx);
+  },
 };
 
 export function evalNode(node: ASTNode, ctx: EvalContext): unknown {

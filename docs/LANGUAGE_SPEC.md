@@ -246,6 +246,7 @@ Used by `compute`, `where` (extended mode), and workflow `when`/`condition` fiel
 | `coalesce(a, b, ...)` | ...any → any | First non-null/non-undefined value |
 | `is_null(v)` | any → bool | True if `null` or `undefined` |
 | `exists(v)` | any → bool | True if not `undefined` |
+| `iff(cond, a, b)` | bool, any, any → any | If `cond` is truthy returns `a`, else `b` (short-circuit) |
 
 **Predicate functions** (`every`, `some`, `count`) use `@` to reference the current element:
 ```
@@ -262,6 +263,7 @@ every(votes, @ == 0)
 coalesce(nickname, fullName, "Unknown")
 days_since(createdAt) < 30
 concat(first, " ", last)
+iff(score > 80, "pass", "fail")
 ```
 
 ---
