@@ -926,8 +926,9 @@ Sub-workflows cannot contain approval/input gates. Circular dependencies are det
   for_each: $fetch.json        # must resolve to array or object (object → [object])
   item_var: "item"             # default: "item"
   index_var: "index"           # default: "index"
-  batch_size: 5                # optional: items per batch
-  pause_ms: 100                # optional: delay between batches (ms)
+  batch_size: 5                # optional: items per batch (sequential only)
+  pause_ms: 100                # optional: delay between batches (sequential only)
+  concurrency: 4               # optional: run up to N iterations in parallel
   steps:
     - id: transform
       run: "echo Processing item $index"
@@ -939,8 +940,9 @@ Sub-workflows cannot contain approval/input gates. Circular dependencies are det
 | `item_var` | string | `"item"` | Variable name for current item |
 | `index_var` | string | `"index"` | Variable name for 0-based index |
 | `include_unmatched` | boolean | `false` | Keep iterations where all sub-steps were skipped |
-| `batch_size` | number | 1 | Items per batch |
-| `pause_ms` | number | 0 | Delay between batches (ms) |
+| `batch_size` | number | 1 | Items per batch (sequential only, cannot be used with `concurrency`) |
+| `pause_ms` | number | 0 | Delay between batches (sequential only, cannot be used with `concurrency`) |
+| `concurrency` | number | 1 | Max iterations to run in parallel. When > 1, iterations execute concurrently. Results preserve input order. On error, in-flight iterations are aborted. |
 | `steps` | array | — | Sub-steps (no approval/input/nested loops) |
 
 Inside loop: `$item.json` = current item, `$index.json` = iteration index.

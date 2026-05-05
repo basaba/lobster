@@ -65,6 +65,7 @@ export type WorkflowStep = {
   index_var?: string;
   batch_size?: number;
   pause_ms?: number;
+  concurrency?: number;
   steps?: WorkflowStep[];
   timeout_ms?: number;
   on_error?: 'stop' | 'continue' | 'skip_rest';
@@ -346,6 +347,19 @@ export async function loadWorkflowFile(filePath: string): Promise<WorkflowFile> 
         )
       ) {
         throw new Error(`Workflow step ${step.id} pause_ms must be a finite non-negative number`);
+      }
+      if (
+        step.concurrency !== undefined
+        && (
+          typeof step.concurrency !== 'number'
+          || !Number.isInteger(step.concurrency)
+          || step.concurrency < 1
+        )
+      ) {
+        throw new Error(`Workflow step ${step.id} concurrency must be a positive integer`);
+      }
+      if (step.concurrency !== undefined && step.concurrency > 1 && (step.batch_size !== undefined || step.pause_ms !== undefined)) {
+        throw new Error(`Workflow step ${step.id} concurrency cannot be used with batch_size or pause_ms`);
       }
       if (isApprovalStep(step.approval)) {
         throw new Error(`Workflow step ${step.id} for_each steps cannot define approval (use a separate step after the loop)`);
@@ -782,18 +796,14 @@ export async function runWorkflowFile({
       } else {
         throw new Error(`Workflow step ${step.id} for_each: expected array or object, got ${typeof rawItemsRef}`);
       }
-      ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — started (for_each, ${itemsRef.length} items)\n`);
+      ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — started (for_each, ${itemsRef.length} items${step.concurrency && step.concurrency > 1 ? `, concurrency: ${step.concurrency}` : ''})\n`);
 
       const itemVar = step.item_var ?? 'item';
       const indexVar = step.index_var ?? 'index';
       const batchSize = step.batch_size ?? 1;
-      const iterationResults: unknown[] = [];
+      const concurrency = step.concurrency ?? 1;
 
-      for (let itemIdx = 0; itemIdx < itemsRef.length; itemIdx++) {
-        if (step.pause_ms && itemIdx > 0 && itemIdx % batchSize === 0) {
-          await abortableSleep(step.pause_ms, ctx.signal);
-        }
-
+      const runIteration = async (itemIdx: number, iterSignal?: AbortSignal): Promise<{ result: Record<string, unknown>; allSkipped: boolean }> => {
         const item = itemsRef[itemIdx];
         const scopedResults: Record<string, WorkflowStepResult> = { ...results };
         scopedResults[itemVar] = {
@@ -807,27 +817,29 @@ export async function runWorkflowFile({
           stdout: String(itemIdx),
         };
 
+        const iterCtx = iterSignal ? { ...ctx, signal: iterSignal } : ctx;
+
         for (const subStep of step.steps) {
           if (!evaluateCondition(subStep.when ?? subStep.condition, scopedResults)) {
             scopedResults[subStep.id] = { id: subStep.id, skipped: true };
             continue;
           }
 
-          const loopEnvBase = mergeEnv(ctx.env, workflow.env, step.env, resolvedArgs, scopedResults);
+          const loopEnvBase = mergeEnv(iterCtx.env, workflow.env, step.env, resolvedArgs, scopedResults);
           const subEnv = subStep.env
             ? mergeEnv(loopEnvBase, undefined, subStep.env, resolvedArgs, scopedResults)
             : loopEnvBase;
-          const subCwd = resolveCwd(subStep.cwd ?? step.cwd ?? workflow.cwd, resolvedArgs, subEnv) ?? ctx.cwd;
+          const subCwd = resolveCwd(subStep.cwd ?? step.cwd ?? workflow.cwd, resolvedArgs, subEnv) ?? iterCtx.cwd;
           const subExecution = getStepExecution(subStep);
 
           let subResult: WorkflowStepResult;
           if (subExecution.kind === 'shell') {
             const command = resolveTemplate(subExecution.value, resolvedArgs, scopedResults, subEnv);
             const stdinValue = resolveShellStdin(subStep.stdin, resolvedArgs, scopedResults, subEnv);
-            const { stdout } = await runShellCommand({ command, stdin: stdinValue, env: subEnv, cwd: subCwd, signal: ctx.signal });
+            const { stdout } = await runShellCommand({ command, stdin: stdinValue, env: subEnv, cwd: subCwd, signal: iterCtx.signal });
             subResult = { id: subStep.id, stdout, json: parseJson(stdout) };
           } else if (subExecution.kind === 'pipeline') {
-            if (!ctx.registry) {
+            if (!iterCtx.registry) {
               throw new Error(`Workflow step ${step.id} for_each sub-step ${subStep.id} requires a command registry for pipeline execution`);
             }
             const pipelineText = resolveTemplate(subExecution.value, resolvedArgs, scopedResults, subEnv);
@@ -836,7 +848,7 @@ export async function runWorkflowFile({
               stepId: subStep.id,
               pipelineText,
               inputValue,
-              ctx,
+              ctx: iterCtx,
               env: subEnv,
               cwd: subCwd,
             });
@@ -852,7 +864,7 @@ export async function runWorkflowFile({
           }
         }
 
-        const iterResult: Record<string, unknown> = { [itemVar]: item, [indexVar]: itemIdx };
+        const iterResult: Record<string, unknown> = { [itemVar]: itemsRef[itemIdx], [indexVar]: itemIdx };
         let allSkipped = true;
         for (const subStep of step.steps) {
           const subResult = scopedResults[subStep.id];
@@ -861,8 +873,58 @@ export async function runWorkflowFile({
             allSkipped = false;
           }
         }
-        if (!allSkipped || step.include_unmatched) {
-          iterationResults.push(iterResult);
+        return { result: iterResult, allSkipped };
+      };
+
+      const iterationResults: unknown[] = [];
+
+      if (concurrency > 1) {
+        // Parallel execution with concurrency limit
+        const loopController = new AbortController();
+        const combinedSignal = ctx.signal
+          ? AbortSignal.any([ctx.signal, loopController.signal])
+          : loopController.signal;
+
+        const orderedResults: ({ result: Record<string, unknown>; allSkipped: boolean } | null)[] = new Array(itemsRef.length).fill(null);
+        let firstError: Error | null = null;
+        let nextIdx = 0;
+
+        const runWorker = async () => {
+          while (!combinedSignal.aborted) {
+            const myIdx = nextIdx++;
+            if (myIdx >= itemsRef.length) break;
+            try {
+              orderedResults[myIdx] = await runIteration(myIdx, combinedSignal);
+            } catch (err: any) {
+              if (!firstError) {
+                firstError = err;
+                loopController.abort();
+              }
+              break;
+            }
+          }
+        };
+
+        const workers = Array.from({ length: Math.min(concurrency, itemsRef.length) }, () => runWorker());
+        await Promise.all(workers);
+
+        if (firstError) throw firstError;
+
+        for (const entry of orderedResults) {
+          if (entry && (!entry.allSkipped || step.include_unmatched)) {
+            iterationResults.push(entry.result);
+          }
+        }
+      } else {
+        // Sequential execution (existing behavior)
+        for (let itemIdx = 0; itemIdx < itemsRef.length; itemIdx++) {
+          if (step.pause_ms && itemIdx > 0 && itemIdx % batchSize === 0) {
+            await abortableSleep(step.pause_ms, ctx.signal);
+          }
+          const { result, allSkipped } = await runIteration(itemIdx);
+          if (!allSkipped || step.include_unmatched) {
+            iterationResults.push(result);
+          }
         }
       }
 
@@ -1414,6 +1476,7 @@ function dryRunWorkflow({
       lines.push(`     item_var: ${dryItemVar}, index_var: ${dryIndexVar}`);
       if (step.batch_size) lines.push(`     batch_size: ${step.batch_size}`);
       if (step.pause_ms) lines.push(`     pause_ms: ${step.pause_ms}`);
+      if (step.concurrency && step.concurrency > 1) lines.push(`     concurrency: ${step.concurrency}`);
       lines.push(`     sub-steps: ${step.steps.length}`);
 
       const loopScopedResults = { ...results };
