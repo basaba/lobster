@@ -91,14 +91,15 @@ export const diffKeyCommand = {
     const items: any[] = [];
     for await (const item of input) items.push(item);
 
-    const currentKeys = new Set<string>();
+    // Merge: preserve all previously-seen keys and add new ones
+    const mergedKeys = new Set<string>(previousKeys);
     const output = items.map((item) => {
       const keyStr = compositeKey(item, fields);
-      currentKeys.add(keyStr);
+      mergedKeys.add(keyStr);
       return { ...item, changed: !previousKeys.has(keyStr) };
     });
 
-    await writeKeySet(stateDir, stateKey, currentKeys);
+    await writeKeySet(stateDir, stateKey, mergedKeys);
 
     return {
       output: (async function* () {
