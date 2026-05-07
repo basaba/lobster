@@ -11,10 +11,20 @@ function normalizeFields(arg: unknown): string[] {
   return ['id'];
 }
 
+function getByPath(obj: unknown, path: string): unknown {
+  const parts = path.split('.');
+  let cur: unknown = obj;
+  for (const p of parts) {
+    if (cur == null || typeof cur !== 'object') return undefined;
+    cur = (cur as Record<string, unknown>)[p];
+  }
+  return cur;
+}
+
 function compositeKey(item: unknown, fields: string[]): string {
   if (item == null || typeof item !== 'object') return String(item ?? '');
-  if (fields.length === 1) return String((item as any)[fields[0]] ?? '');
-  return fields.map((f) => String((item as any)[f] ?? '')).join('\0');
+  if (fields.length === 1) return String(getByPath(item, fields[0]) ?? '');
+  return fields.map((f) => String(getByPath(item, f) ?? '')).join('\0');
 }
 
 export const diffKeyExistsCommand = {
