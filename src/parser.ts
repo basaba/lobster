@@ -165,6 +165,15 @@ function tokenizeCommand(input) {
 function parseArgs(tokens) {
   const args = { _: [] };
 
+  const set = (key, value) => {
+    if (key in args) {
+      const prev = args[key];
+      args[key] = Array.isArray(prev) ? [...prev, value] : [prev, value];
+    } else {
+      args[key] = value;
+    }
+  };
+
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i];
 
@@ -173,17 +182,17 @@ function parseArgs(tokens) {
       if (eq !== -1) {
         const key = tok.slice(2, eq);
         const value = tok.slice(eq + 1);
-        args[key] = value;
+        set(key, value);
         continue;
       }
 
       const key = tok.slice(2);
       const next = tokens[i + 1];
       if (!next || next.startsWith('--')) {
-        args[key] = true;
+        set(key, true);
         continue;
       }
-      args[key] = next;
+      set(key, next);
       i++;
       continue;
     }
