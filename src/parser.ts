@@ -6,6 +6,7 @@ function splitPipes(input) {
   const parts = [];
   let current = '';
   let quote = null;
+  let parenDepth = 0;
 
   for (let i = 0; i < input.length; i++) {
     const ch = input[i];
@@ -32,7 +33,24 @@ function splitPipes(input) {
       continue;
     }
 
-    if (ch === '|') {
+    if (ch === '(' && !quote) {
+      parenDepth++;
+      current += ch;
+      continue;
+    }
+    if (ch === ')' && !quote) {
+      parenDepth--;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '|' && parenDepth === 0) {
+      // Skip || (logical OR) — not a pipe separator
+      if (input[i + 1] === '|') {
+        current += '||';
+        i++;
+        continue;
+      }
       parts.push(current.trim());
       current = '';
       continue;
@@ -50,6 +68,7 @@ function tokenizeCommand(input) {
   const tokens = [];
   let current = '';
   let quote = null;
+  let parenDepth = 0;
 
   const push = () => {
     if (current.length > 0) tokens.push(current);
@@ -58,6 +77,24 @@ function tokenizeCommand(input) {
 
   for (let i = 0; i < input.length; i++) {
     const ch = input[i];
+
+    // Inside parenthesized group — collect everything until matching close
+    if (parenDepth > 0) {
+      if (ch === '(') {
+        parenDepth++;
+        current += ch;
+      } else if (ch === ')') {
+        parenDepth--;
+        if (parenDepth === 0) {
+          // End of paren group — don't include the closing paren
+          continue;
+        }
+        current += ch;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
 
     if (quote) {
       if (quote === "'") {
@@ -105,6 +142,12 @@ function tokenizeCommand(input) {
       continue;
     }
 
+    // Open paren at token boundary starts a grouped expression
+    if (ch === '(' && current.length === 0) {
+      parenDepth = 1;
+      continue;
+    }
+
     if (isWhitespace(ch)) {
       push();
       continue;
@@ -114,6 +157,7 @@ function tokenizeCommand(input) {
   }
 
   if (quote) throw new Error('Unclosed quote');
+  if (parenDepth > 0) throw new Error('Unclosed parenthesis');
   push();
   return tokens;
 }
