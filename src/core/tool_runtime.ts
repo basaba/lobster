@@ -8,6 +8,7 @@ import { runPipeline } from '../runtime.js';
 import { encodeToken } from '../token.js';
 import { deleteStateJson, deleteApprovalId, findStateKeyByApprovalId, cleanupApprovalIndexByStateKey } from '../state/store.js';
 import { WorkflowResumeArgumentError, runWorkflowFile } from '../workflows/file.js';
+import { writeDebugSnapshot } from '../debug/snapshot.js';
 import {
   finalizePipelineToolRun,
   loadPipelineResumeState,
@@ -24,6 +25,8 @@ type ToolRunContext = {
   signal?: AbortSignal;
   registry?: any;
   llmAdapters?: Record<string, any>;
+  dryRun?: boolean;
+  debug?: boolean;
 };
 
 type ToolEnvelope = {
@@ -98,6 +101,11 @@ export async function runToolRequest({
       }
       if (output.status === 'cancelled') {
         return okEnvelope('cancelled', [], null, null);
+      }
+      if (runtime.debug && output._debug) {
+        const snapshotPath = await writeDebugSnapshot(output._debug, runtime.cwd);
+        runtime.stderr.write(`\nDebug snapshot written to: ${snapshotPath}\n`);
+        runtime.stderr.write(`Inspect with: lobster debug ${snapshotPath}\n`);
       }
       return okEnvelope('ok', output.output, null, null);
     } catch (err: any) {
@@ -307,6 +315,8 @@ export function createToolContext(ctx: ToolRunContext = {}) {
     signal: ctx.signal,
     registry: ctx.registry ?? createDefaultRegistry(),
     llmAdapters: ctx.llmAdapters,
+    dryRun: ctx.dryRun,
+    debug: ctx.debug,
   };
 }
 

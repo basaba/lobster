@@ -132,6 +132,17 @@ export type WorkflowStepResult = {
   };
 };
 
+export type DebugSnapshot = {
+  runId: string;
+  timestamp: string;
+  workflowFile: string;
+  workflowName?: string;
+  args: Record<string, unknown>;
+  env: Record<string, string>;
+  steps: Record<string, WorkflowStepResult>;
+  status: 'ok' | 'needs_approval' | 'needs_input' | 'cancelled';
+};
+
 export type WorkflowRunResult = {
   status: 'ok' | 'needs_approval' | 'needs_input' | 'cancelled';
   output: unknown[];
@@ -157,6 +168,7 @@ export type WorkflowRunResult = {
   _meta?: {
     cost?: CostSummary;
   };
+  _debug?: DebugSnapshot;
 };
 
 type RunContext = {
@@ -172,6 +184,7 @@ type RunContext = {
   };
   llmAdapters?: Record<string, any>;
   dryRun?: boolean;
+  debug?: boolean;
   _activeWorkflows?: Set<string>;
 };
 
@@ -1372,6 +1385,17 @@ export async function runWorkflowFile({
     if (costTracker.hasUsage()) {
       runResult._meta = { cost: costTracker.getSummary() };
     }
+    if (ctx.debug) {
+      runResult._debug = buildDebugSnapshot({
+        runId: randomUUID(),
+        workflowFile: resolvedFilePath,
+        workflowName: workflow.name,
+        args: resolvedArgs,
+        workflowEnv: workflow.env,
+        steps: results,
+        status: 'ok',
+      });
+    }
     return runResult;
   } finally {
     ctx._activeWorkflows?.delete(canonicalFilePath);
@@ -1851,13 +1875,13 @@ function resolveStepRefs(input: string, results: Record<string, WorkflowStepResu
   });
 }
 
-function parseStepRef(value: string) {
+export function parseStepRef(value: string) {
   const match = value.match(/^\$([A-Za-z0-9_-]+)\.([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)$/);
   if (!match) return null;
   return { id: match[1], path: match[2] };
 }
 
-function getStepRefValue(
+export function getStepRefValue(
   ref: { id: string; path: string },
   results: Record<string, WorkflowStepResult>,
   strict: boolean,
@@ -2977,4 +3001,39 @@ function buildResultPreview(result: WorkflowStepResult) {
   if (result.stdout) return result.stdout.trim().slice(0, 2000);
   if (result.json !== undefined) return serializeValueForStdout(result.json).trim().slice(0, 2000);
   return undefined;
+}
+
+function buildDebugSnapshot({
+  runId,
+  workflowFile,
+  workflowName,
+  args,
+  workflowEnv,
+  steps,
+  status,
+}: {
+  runId: string;
+  workflowFile: string;
+  workflowName?: string;
+  args: Record<string, unknown>;
+  workflowEnv?: Record<string, string>;
+  steps: Record<string, WorkflowStepResult>;
+  status: DebugSnapshot['status'];
+}): DebugSnapshot {
+  const env: Record<string, string> = {};
+  if (workflowEnv) {
+    for (const [key, value] of Object.entries(workflowEnv)) {
+      env[key] = value;
+    }
+  }
+  return {
+    runId,
+    timestamp: new Date().toISOString(),
+    workflowFile,
+    workflowName,
+    args,
+    env,
+    steps: JSON.parse(JSON.stringify(steps)),
+    status,
+  };
 }

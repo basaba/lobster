@@ -12,6 +12,9 @@ import {
   loadPipelineResumeState,
   validatePipelineInputResponse,
 } from './pipeline_resume_state.js';
+import { writeDebugSnapshot } from './debug/snapshot.js';
+import { readDebugSnapshot } from './debug/snapshot.js';
+import { startDebugRepl } from './debug/repl.js';
 
 export async function runCli(argv) {
   const registry = createDefaultRegistry();
@@ -54,6 +57,11 @@ export async function runCli(argv) {
 
   if (argv[0] === 'run') {
     await handleRun({ argv: argv.slice(1), registry });
+    return;
+  }
+
+  if (argv[0] === 'debug') {
+    await handleDebug({ argv: argv.slice(1) });
     return;
   }
 
@@ -127,9 +135,26 @@ function isWorkflowGraphFormat(value: string): value is WorkflowGraphFormat {
   return value === 'mermaid' || value === 'dot' || value === 'ascii';
 }
 
+async function handleDebug({ argv }: { argv: string[] }) {
+  const filePath = argv[0];
+  if (!filePath) {
+    process.stderr.write('Usage: lobster debug <snapshot-file>\n');
+    process.stderr.write('Load a debug snapshot and start an interactive REPL.\n');
+    process.exitCode = 2;
+    return;
+  }
+  try {
+    const snapshot = await readDebugSnapshot(filePath);
+    await startDebugRepl(snapshot, process.stdin, process.stdout);
+  } catch (err: any) {
+    process.stderr.write(`Error: ${err?.message ?? String(err)}\n`);
+    process.exitCode = 1;
+  }
+}
+
 async function handleRun({ argv, registry }) {
   const parsed = parseRunArgs(argv);
-  const { mode, argsJson } = parsed;
+  const { mode, argsJson, debug } = parsed;
   const normalizedMode = normalizeMode(mode);
   const { rest, filePath, dryRun } = await resolveRunTarget(parsed);
 
@@ -165,8 +190,15 @@ async function handleRun({ argv, registry }) {
           mode: normalizedMode,
           registry,
           dryRun,
+          debug,
         },
       });
+
+      if (debug && output._debug) {
+        const snapshotPath = await writeDebugSnapshot(output._debug, process.cwd());
+        process.stderr.write(`\nDebug snapshot written to: ${snapshotPath}\n`);
+        process.stderr.write(`Inspect with: lobster debug ${snapshotPath}\n`);
+      }
 
       if (normalizedMode === 'tool') {
         if (output.status === 'needs_approval') {
@@ -296,6 +328,7 @@ function parseRunArgs(argv) {
   let filePath = null;
   let argsJson = null;
   let dryRun = false;
+  let debug = false;
 
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
@@ -306,6 +339,11 @@ function parseRunArgs(argv) {
     // first positional token is actually a workflow file.
     if (tok === '--dry-run' && rest.length === 0) {
       dryRun = true;
+      continue;
+    }
+
+    if (tok === '--debug' && rest.length === 0) {
+      debug = true;
       continue;
     }
 
@@ -354,7 +392,7 @@ function parseRunArgs(argv) {
     rest.push(tok);
   }
 
-  return { mode, rest, filePath, argsJson, dryRun };
+  return { mode, rest, filePath, argsJson, dryRun, debug };
 }
 
 function parseGraphArgs(argv: string[]) {
@@ -734,6 +772,8 @@ function helpText() {
     `  lobster run --file path/to/workflow.lobster --args-json '{...}'\n` +
     `  lobster run --dry-run --file path/to/workflow.lobster\n` +
     `  lobster run --dry-run '<pipeline>'\n` +
+    `  lobster run --debug path/to/workflow.lobster\n` +
+    `  lobster debug <snapshot-file>\n` +
     `  lobster graph --file path/to/workflow.lobster --format mermaid\n` +
     `  lobster graph --file path/to/workflow.lobster --format dot\n` +
     `  lobster graph --file path/to/workflow.lobster --format ascii\n` +
@@ -744,7 +784,8 @@ function helpText() {
     `  lobster version\n` +
     `  lobster help <command>\n\n` +
     `Flags:\n` +
-    `  --dry-run  Validate and print the execution plan without running anything\n\n` +
+    `  --dry-run  Validate and print the execution plan without running anything\n` +
+    `  --debug    Run workflow and save a debug snapshot for later inspection\n\n` +
     `Modes:\n` +
     `  - human (default): renderers can write to stdout\n` +
     `  - tool: prints a single JSON envelope for easy integration\n\n` +
