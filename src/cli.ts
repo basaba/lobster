@@ -13,8 +13,6 @@ import {
   validatePipelineInputResponse,
 } from './pipeline_resume_state.js';
 import { writeDebugSnapshot } from './debug/snapshot.js';
-import { readDebugSnapshot } from './debug/snapshot.js';
-import { startDebugRepl } from './debug/repl.js';
 
 export async function runCli(argv) {
   const registry = createDefaultRegistry();
@@ -57,11 +55,6 @@ export async function runCli(argv) {
 
   if (argv[0] === 'run') {
     await handleRun({ argv: argv.slice(1), registry });
-    return;
-  }
-
-  if (argv[0] === 'debug') {
-    await handleDebug({ argv: argv.slice(1) });
     return;
   }
 
@@ -135,23 +128,6 @@ function isWorkflowGraphFormat(value: string): value is WorkflowGraphFormat {
   return value === 'mermaid' || value === 'dot' || value === 'ascii';
 }
 
-async function handleDebug({ argv }: { argv: string[] }) {
-  const filePath = argv[0];
-  if (!filePath) {
-    process.stderr.write('Usage: lobster debug <snapshot-file>\n');
-    process.stderr.write('Load a debug snapshot and start an interactive REPL.\n');
-    process.exitCode = 2;
-    return;
-  }
-  try {
-    const snapshot = await readDebugSnapshot(filePath);
-    await startDebugRepl(snapshot, process.stdin, process.stdout);
-  } catch (err: any) {
-    process.stderr.write(`Error: ${err?.message ?? String(err)}\n`);
-    process.exitCode = 1;
-  }
-}
-
 async function handleRun({ argv, registry }) {
   const parsed = parseRunArgs(argv);
   const { mode, argsJson, debug } = parsed;
@@ -197,7 +173,7 @@ async function handleRun({ argv, registry }) {
       if (debug && output._debug) {
         const snapshotPath = await writeDebugSnapshot(output._debug, process.cwd());
         process.stderr.write(`\nDebug snapshot written to: ${snapshotPath}\n`);
-        process.stderr.write(`Inspect with: lobster debug ${snapshotPath}\n`);
+        process.stderr.write(`Inspect with: tinyclaw debug ${snapshotPath}\n`);
       }
 
       if (normalizedMode === 'tool') {
@@ -773,7 +749,6 @@ function helpText() {
     `  lobster run --dry-run --file path/to/workflow.lobster\n` +
     `  lobster run --dry-run '<pipeline>'\n` +
     `  lobster run --debug path/to/workflow.lobster\n` +
-    `  lobster debug <snapshot-file>\n` +
     `  lobster graph --file path/to/workflow.lobster --format mermaid\n` +
     `  lobster graph --file path/to/workflow.lobster --format dot\n` +
     `  lobster graph --file path/to/workflow.lobster --format ascii\n` +

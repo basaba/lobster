@@ -105,7 +105,7 @@ export async function runToolRequest({
       if (runtime.debug && output._debug) {
         const snapshotPath = await writeDebugSnapshot(output._debug, runtime.cwd);
         runtime.stderr.write(`\nDebug snapshot written to: ${snapshotPath}\n`);
-        runtime.stderr.write(`Inspect with: lobster debug ${snapshotPath}\n`);
+        runtime.stderr.write(`Inspect with: tinyclaw debug ${snapshotPath}\n`);
       }
       return okEnvelope('ok', output.output, null, null);
     } catch (err: any) {
