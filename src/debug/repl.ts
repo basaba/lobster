@@ -113,8 +113,11 @@ export async function startDebugRepl(
     input: input as any,
     output: output as any,
     prompt: 'debug> ',
+    terminal: true,
   });
 
+  // Ensure terminal cursor is visible (may be hidden by TUI frameworks)
+  output.write('\x1B[?25h');
   output.write(`\nDebug session for workflow: ${snapshot.workflowName ?? snapshot.workflowFile}\n`);
   output.write(`Run ID: ${snapshot.runId} | Status: ${snapshot.status} | ${Object.keys(snapshot.steps).length} step(s)\n`);
   output.write('Type .help for available commands, .exit to quit.\n\n');
