@@ -24,6 +24,7 @@ function runGh(argv, { env, cwd }) {
       env,
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     });
 
     let stdout = '';

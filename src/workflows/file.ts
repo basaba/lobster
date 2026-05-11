@@ -2689,6 +2689,7 @@ async function runShellCommand({
       signal,
       killSignal,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     });
 
     let stdout = '';

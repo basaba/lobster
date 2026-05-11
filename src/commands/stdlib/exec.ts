@@ -105,6 +105,7 @@ function runProcess(command, argv, { env, cwd, stdin, signal }) {
       cwd,
       signal,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     });
 
     let stdout = '';

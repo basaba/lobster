@@ -6,6 +6,7 @@ function run(cmd: string, argv: string[], env: Record<string, string | undefined
       env: { ...process.env, ...env },
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     let stdout = "";

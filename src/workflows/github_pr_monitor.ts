@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 
 function runProcess(command, argv, { env, cwd }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, argv, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, argv, { env, cwd, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 
     let stdout = '';
     let stderr = '';
