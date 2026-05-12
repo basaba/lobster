@@ -22,7 +22,7 @@ interface Token {
 
 export type ASTNode =
   | { kind: 'literal'; value: unknown }
-  | { kind: 'path'; root: '$' | '@'; parts: string[] }
+  | { kind: 'path'; root: '$' | '@'; parts: string[]; implicit?: boolean }
   | { kind: 'binary'; op: string; left: ASTNode; right: ASTNode }
   | { kind: 'unary'; op: string; operand: ASTNode }
   | { kind: 'call'; name: string; args: ASTNode[] };
@@ -332,7 +332,7 @@ class Parser {
       }
 
       // bare identifier = implicit $ path
-      return { kind: 'path', root: '$', parts: [name] };
+      return { kind: 'path', root: '$', parts: [name], implicit: true };
     }
 
     throw new Error(`Unexpected token '${t.value}' at position ${t.pos}`);

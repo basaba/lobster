@@ -1,53 +1,101 @@
-function parsePredicate(expr) {
-  const m = expr.match(/^([a-zA-Z0-9_.]+)\s*(==|=|!=|<=|>=|<|>)\s*(.+)$/);
-  if (!m) throw new Error(`Invalid where expression: ${expr}`);
-  const [, path, op, rawValue] = m;
+import { parseExpr, evaluate, type ASTNode } from '../../core/expr.js';
 
-  let value = rawValue;
-  if (rawValue === 'true') value = true;
-  else if (rawValue === 'false') value = false;
-  else if (rawValue === 'null') value = null;
-  else if (!Number.isNaN(Number(rawValue)) && rawValue.trim() !== '') value = Number(rawValue);
+/**
+ * Backward-compatibility transform for `where` expressions.
+ *
+ * The old `where` parser treated the RHS of comparisons as string literals
+ * by default (e.g. `status==queued` compared against the string "queued").
+ * The full expression parser treats `queued` as a property path `$.queued`.
+ *
+ * This transform walks the AST and converts bare identifier paths on the RHS
+ * of comparison operators into string literals, unless they are:
+ * - Explicitly rooted with `$` or `@`
+ * - Boolean/null literals (already handled by the parser)
+ * - Function calls
+ * - Numeric literals
+ * - Already string literals
+ */
+function coerceBarePaths(node: ASTNode): ASTNode {
+  if (node.kind === 'binary') {
+    const isComparison = ['==', '!=', '<', '<=', '>', '>='].includes(node.op);
+    const left = coerceBarePaths(node.left);
+    let right = coerceBarePaths(node.right);
 
-  return { path, op: op === '=' ? '==' : op, value };
-}
+    if (isComparison && right.kind === 'path' && right.implicit && right.parts.length > 0) {
+      // Bare path like `queued` or `foo.bar` on RHS → treat as string literal
+      const str = right.parts.join('.');
+      right = { kind: 'literal', value: str };
+    }
 
-function getPath(obj, path) {
-  const parts = path.split('.');
-  let cur = obj;
-  for (const p of parts) {
-    if (cur === null || typeof cur !== 'object') return undefined;
-    cur = cur[p];
+    return { ...node, left, right };
   }
-  return cur;
-}
 
-function compare(left, op, right) {
-  switch (op) {
-    case '==': return left == right; // intentional loose equality for convenience
-    case '!=': return left != right;
-    case '<': return left < right;
-    case '<=': return left <= right;
-    case '>': return left > right;
-    case '>=': return left >= right;
-    default: throw new Error(`Unsupported operator: ${op}`);
+  if (node.kind === 'unary') {
+    return { ...node, operand: coerceBarePaths(node.operand) };
   }
+
+  if (node.kind === 'call') {
+    return { ...node, args: node.args.map(coerceBarePaths) };
+  }
+
+  return node;
 }
 
-function parseCompound(expr) {
-  // Split on || first (lower precedence), then && within each branch
-  const orBranches = expr.split('||').map((s) => s.trim());
-  return orBranches.map((branch) => {
-    const andParts = branch.split('&&').map((s) => s.trim()).filter(Boolean);
-    return andParts.map(parsePredicate);
-  });
-}
+/**
+ * Normalize single `=` to `==` in a quote-aware manner.
+ * Skips `!=`, `<=`, `>=`, and `==`, and does not touch `=` inside quoted strings.
+ */
+function normalizeSingleEquals(expr: string): string {
+  const result: string[] = [];
+  let i = 0;
 
-function evalCompound(item, branches) {
-  // OR of ANDs: at least one branch must have all predicates true
-  return branches.some((andPreds) =>
-    andPreds.every((pred) => compare(getPath(item, pred.path), pred.op, pred.value))
-  );
+  while (i < expr.length) {
+    const ch = expr[i];
+
+    // Skip quoted strings
+    if (ch === '"' || ch === "'") {
+      const quote = ch;
+      result.push(ch);
+      i++;
+      while (i < expr.length && expr[i] !== quote) {
+        if (expr[i] === '\\' && i + 1 < expr.length) {
+          result.push(expr[i], expr[i + 1]);
+          i += 2;
+        } else {
+          result.push(expr[i]);
+          i++;
+        }
+      }
+      if (i < expr.length) { result.push(expr[i]); i++; }
+      continue;
+    }
+
+    // Check for multi-char operators containing '='
+    if ((ch === '!' || ch === '<' || ch === '>') && i + 1 < expr.length && expr[i + 1] === '=') {
+      result.push(ch, '=');
+      i += 2;
+      continue;
+    }
+
+    // Check for '==' (already double)
+    if (ch === '=' && i + 1 < expr.length && expr[i + 1] === '=') {
+      result.push('==');
+      i += 2;
+      continue;
+    }
+
+    // Single '=' → normalize to '=='
+    if (ch === '=') {
+      result.push('==');
+      i++;
+      continue;
+    }
+
+    result.push(ch);
+    i++;
+  }
+
+  return result.join('');
 }
 
 export const whereCommand = {
@@ -75,23 +123,30 @@ export const whereCommand = {
       `  ... | where minutes>=30\n` +
       `  ... | where sender.domain==example.com\n` +
       `  ... | where "x>5 && y<6"\n` +
-      `  ... | where "status=active || priority>3"\n\n` +
+      `  ... | where "status==active || priority>3"\n` +
+      `  ... | where "(status==active || status==new) && priority>3"\n\n` +
       `Notes:\n` +
       `  - && (AND) and || (OR) combine multiple predicates.\n` +
       `  - && binds tighter than ||.\n` +
-      `  - Quote the expression when using && or ||.\n`
+      `  - Use parentheses to group sub-expressions.\n` +
+      `  - Quote the expression when using &&, ||, or parentheses.\n` +
+      `  - Supports functions: contains(), starts_with(), length(), etc.\n` +
+      `  - Bare identifiers on the RHS of comparisons are treated as strings.\n` +
+      `    Use $.field to compare against another property.\n`
     );
   },
   async run({ input, args }) {
     const expr = args._.join(' ');
     if (!expr) throw new Error('where requires an expression (e.g. field=value)');
 
-    const branches = parseCompound(expr);
+    const normalized = normalizeSingleEquals(expr);
+    const rawAst = parseExpr(normalized);
+    const ast = coerceBarePaths(rawAst);
 
     return {
       output: (async function* () {
         for await (const item of input) {
-          if (evalCompound(item, branches)) yield item;
+          if (evaluate(ast, item)) yield item;
         }
       })(),
     };
