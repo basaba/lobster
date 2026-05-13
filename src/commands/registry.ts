@@ -20,6 +20,7 @@ import { diffLastCommand } from "./stdlib/diff_last.js";
 import { diffGateCommand } from "./stdlib/diff_gate.js";
 import { diffKeyCommand } from "./stdlib/diff_key.js";
 import { diffKeyExistsCommand } from "./stdlib/diff_key_exists.js";
+import { diffKeySetCommand } from "./stdlib/diff_key_set.js";
 import { workflowsListCommand } from "./workflows/workflows_list.js";
 import { workflowsRunCommand } from "./workflows/workflows_run.js";
 import { commandsListCommand } from "./commands_list.js";
@@ -60,6 +61,7 @@ export function createDefaultRegistry() {
     diffGateCommand,
     diffKeyCommand,
     diffKeyExistsCommand,
+    diffKeySetCommand,
     workflowsListCommand,
     workflowsRunCommand,
     commandsListCommand,
