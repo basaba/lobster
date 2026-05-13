@@ -133,6 +133,20 @@ test('where: contains() function', async () => {
   assert.equal(out[0].title, 'fix: resolve bug in parser');
 });
 
+// ── Multi-word RHS (pipeline tokenizer strips quotes) ──
+
+test('where: multi-word RHS after quote stripping (backward compat)', async () => {
+  const data = [
+    { policyType: 'Required reviewers', status: 'active' },
+    { policyType: 'Build', status: 'passed' },
+  ];
+  // Simulate what the pipeline tokenizer produces: policyType==Required reviewers
+  // (the double quotes around "Required reviewers" were stripped by tokenizer)
+  const out = await run(`where policyType=="Required reviewers"`, data);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].policyType, 'Required reviewers');
+});
+
 // ── Equals inside quoted strings should not be normalized ──
 
 test('where: = inside quoted string is preserved', async () => {

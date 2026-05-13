@@ -42,6 +42,31 @@ function coerceBarePaths(node: ASTNode): ASTNode {
 }
 
 /**
+ * Re-quote a simple comparison whose RHS lost its quotes during pipeline
+ * tokenization.  The pipeline tokenizer strips `"…"` as shell syntax, so
+ *   where policyType=="Required reviewers"
+ * arrives here as the text `policyType==Required reviewers`.
+ * This helper detects the pattern and re-wraps the RHS so the expression
+ * engine can parse it.  Only applies to single comparisons (no `||`/`&&`).
+ */
+function reQuoteRhs(expr: string): string | null {
+  // Bail if the expression contains logical operators — user must quote those
+  if (/\|\||&&/.test(expr)) return null;
+
+  const m = expr.match(
+    /^([a-zA-Z_$@][\w.$@]*)\s*(==|!=|<=|>=|<|>)\s*(.+)$/,
+  );
+  if (!m) return null;
+
+  const [, field, op, value] = m;
+  // Only re-quote if the value contains a space and isn't already quoted
+  if (!value.includes(' ')) return null;
+  if (/^["']/.test(value)) return null;
+
+  return `${field}${op}"${value}"`;
+}
+
+/**
  * Normalize single `=` to `==` in a quote-aware manner.
  * Skips `!=`, `<=`, `>=`, and `==`, and does not touch `=` inside quoted strings.
  */
@@ -140,7 +165,21 @@ export const whereCommand = {
     if (!expr) throw new Error('where requires an expression (e.g. field=value)');
 
     const normalized = normalizeSingleEquals(expr);
-    const rawAst = parseExpr(normalized);
+
+    let rawAst: ASTNode;
+    try {
+      rawAst = parseExpr(normalized);
+    } catch (e) {
+      // Fallback: the pipeline tokenizer may have stripped quotes from a
+      // multi-word RHS (e.g. policyType=="Required reviewers" → policyType==Required reviewers).
+      // Try re-quoting the RHS before giving up.
+      const reQuoted = reQuoteRhs(normalized);
+      if (reQuoted) {
+        rawAst = parseExpr(reQuoted);
+      } else {
+        throw e;
+      }
+    }
     const ast = coerceBarePaths(rawAst);
 
     return {
