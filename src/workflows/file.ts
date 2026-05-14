@@ -718,7 +718,7 @@ export async function runWorkflowFile({
     for (let idx = startIndex; idx < steps.length; idx++) {
       const step = steps[idx];
 
-    if (!evaluateCondition(step.when ?? step.condition, results)) {
+    if (!evaluateCondition(step.when ?? step.condition, results, resolvedArgs)) {
       results[step.id] = { id: step.id, skipped: true };
       ctx.stderr.write(`[STEP ${idx + 1}/${steps.length}] ${step.id} — skipped (condition not met)\n`);
       continue;
@@ -833,7 +833,7 @@ export async function runWorkflowFile({
         const iterCtx = iterSignal ? { ...ctx, signal: iterSignal } : ctx;
 
         for (const subStep of step.steps) {
-          if (!evaluateCondition(subStep.when ?? subStep.condition, scopedResults)) {
+          if (!evaluateCondition(subStep.when ?? subStep.condition, scopedResults, resolvedArgs)) {
             scopedResults[subStep.id] = { id: subStep.id, skipped: true };
             continue;
           }
@@ -1469,7 +1469,7 @@ function dryRunWorkflow({
     const step = steps[idx];
     const num = idx - startIndex + 1;
 
-    if (!evaluateCondition(step.when ?? step.condition, results)) {
+    if (!evaluateCondition(step.when ?? step.condition, results, resolvedArgs)) {
       results[step.id] = { id: step.id, skipped: true };
       lines.push(`  ${num}. ${step.id}  [skipped — condition: false]`);
       continue;
@@ -1508,7 +1508,7 @@ function dryRunWorkflow({
       loopScopedResults[dryIndexVar] = { id: dryIndexVar, json: 0 };
       for (let subIdx = 0; subIdx < step.steps.length; subIdx++) {
         const sub = step.steps[subIdx];
-        if (!evaluateCondition(sub.when ?? sub.condition, loopScopedResults)) {
+        if (!evaluateCondition(sub.when ?? sub.condition, loopScopedResults, resolvedArgs)) {
           lines.push(`       ${subIdx + 1}. ${sub.id}  [skipped — condition: false]`);
           loopScopedResults[sub.id] = { id: sub.id, skipped: true };
           continue;
@@ -1897,6 +1897,7 @@ export function getStepRefValue(
 function evaluateCondition(
   condition: unknown,
   results: Record<string, WorkflowStepResult>,
+  args: Record<string, unknown> = {},
 ) {
   if (condition === undefined || condition === null) return true;
   if (typeof condition === 'boolean') return condition;
@@ -1905,7 +1906,7 @@ function evaluateCondition(
   const trimmed = condition.trim();
   if (trimmed === 'true') return true;
   if (trimmed === 'false') return false;
-  return evaluateConditionExpression(trimmed, results);
+  return evaluateConditionExpression(trimmed, results, {}, args);
 }
 
 function isApprovalStep(approval: WorkflowStep['approval']) {
@@ -2317,12 +2318,14 @@ function getValueByPath(value: unknown, pathValue: string) {
 type ConditionToken =
   | { type: 'lparen' | 'rparen' | 'comma' | 'and' | 'or' | 'eq' | 'neq' | 'lt' | 'lte' | 'gt' | 'gte' | 'not' }
   | { type: 'step_ref'; value: { id: string; path: string } }
+  | { type: 'arg_ref'; value: string }
   | { type: 'string' | 'number' | 'boolean' | 'null' | 'identifier'; value: unknown };
 
 function evaluateConditionExpression(
   expression: string,
   results: Record<string, WorkflowStepResult>,
   locals: Record<string, unknown> = {},
+  args: Record<string, unknown> = {},
 ) {
   const tokens = tokenizeCondition(expression);
   if (tokens.length === 0) {
@@ -2406,6 +2409,10 @@ function evaluateConditionExpression(
         return getValueByPath(currentLocals[ref.id], ref.path);
       }
       return getStepRefValue(ref, results, true);
+    }
+    if (token.type === 'arg_ref') {
+      const key = token.value as string;
+      return key in args ? args[key] : undefined;
     }
     if (token.type === 'string' || token.type === 'number' || token.type === 'boolean' || token.type === 'null') {
       return token.value;
@@ -2587,6 +2594,13 @@ function tokenizeCondition(expression: string): ConditionToken[] {
       continue;
     }
     if (ch === '$') {
+      // Check for arg ref ${arg_name} first
+      const argMatch = expression.slice(index).match(/^\$\{([A-Za-z0-9_-]+)\}/);
+      if (argMatch) {
+        tokens.push({ type: 'arg_ref', value: argMatch[1] });
+        index += argMatch[0].length;
+        continue;
+      }
       const matched = matchConditionStepRef(expression, index);
       if (!matched) {
         throw new Error(`Unsupported condition: ${expression}`);
