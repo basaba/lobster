@@ -314,6 +314,44 @@ env:
 - In `env` blocks, workflow-level vars resolve against the base process env; step-level vars resolve against base + workflow env (no circular refs).
 - Not resolved in `--dry-run` or `graph` output to avoid leaking secrets.
 
+### Global Config Interpolation
+
+Reference values from the user's global config file with `${config:KEY}`:
+
+```yaml
+run: "deploy --cluster ${config:cluster} --team ${config:team}"
+env:
+  API_BASE: "${config:base_url}/api/v2"
+args:
+  cluster:
+    default: "${config:default_cluster}"
+```
+
+- Syntax: `${config:KEY}` — the `config:` prefix distinguishes from args and env.
+- If the key is not found, the literal `${config:KEY}` is left as-is.
+- Works in all the same fields as `${arg_name}` and `${env:VAR}`: `run`/`command`, `pipeline`, `stdin`, `env`, `cwd`, `workflow` paths.
+- Not resolved in `--dry-run` or `graph` output.
+
+**Config file location:**
+
+| Platform       | Path                                    |
+|----------------|-----------------------------------------|
+| Linux / macOS  | `~/.lobster/globals.json`               |
+| Windows        | `~/.lobster/globals.json`               |
+| Override       | `LOBSTER_GLOBALS_FILE` environment variable |
+
+The file is a flat JSON object with string values:
+
+```json
+{
+  "cluster": "prod-us-east",
+  "team": "platform",
+  "base_url": "https://api.example.com"
+}
+```
+
+If the file does not exist, no error is raised — config interpolation simply has no values to resolve.
+
 ### Step Reference Substitution
 
 Reference prior step outputs with `$step_id.field`:
@@ -334,7 +372,7 @@ when: $approval.approved == true   # in conditions
 | `$step_id.skipped` | Whether step was skipped |
 
 **Resolution order** in a single expression:
-1. First pass: resolve `${arg_name}` and `${env:VAR}` → arg/env values.
+1. First pass: resolve `${arg_name}`, `${env:VAR}`, and `${config:KEY}` → arg/env/config values.
 2. Second pass: resolve `$step_id.field` → step output values.
 
 ---
